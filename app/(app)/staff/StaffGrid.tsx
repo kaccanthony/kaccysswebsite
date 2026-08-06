@@ -12,7 +12,7 @@ import {
   aosForPosition,
   type RankKey,
   type StaffMember,
-} from '@/lib/staff';
+} from '@/lib/staff-helpers';
 import 'aos/dist/aos.css';
 // staff.css is imported once by page.tsx (the parent route) — not duplicated here.
 

@@ -3,7 +3,8 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowLeft, faUser, faEyeSlash } from '@fortawesome/free-solid-svg-icons';
-import { getStaffMemberByName, RANK_CONFIG } from '@/lib/staff';
+import { getStaffMemberByName } from '@/lib/staff';
+import { RANK_CONFIG } from '@/lib/staff-helpers';
 import { getCurrentUser } from '@/lib/getCurrentUser';
 import '../staff.css';
 
