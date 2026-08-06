@@ -1,16 +1,19 @@
+@import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Lexend:wght@100..900&display=swap');
+/* FILE: app/globals.css */
 /* ── Reset ──────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
     min-height: 100%;
-    font-family: 'Libre Baskerville', serif;
+    font-family: 'Lexend', serif;
     background: #000;
     color: #fff;
     overflow-x: hidden;
 }
 
-/* ── Blurred background image (every page) ──────────── */
-#bg {
+/* ── Blurred background — LOGIN / public pages only ──────────── */
+.bg-login {
     position: fixed;
     inset: 0;
     background: url("/images/bg.png") center/cover no-repeat;
@@ -18,11 +21,23 @@ html, body {
     transform: scale(1.1);
     z-index: 0;
 }
-#bg::after {
+.bg-login::after {
     content: '';
     position: absolute;
     inset: 0;
     background: rgba(0, 0, 0, 0.50);
+}
+
+/* ── Blurred background — DASHBOARD / authenticated app pages ── */
+.bg-app {
+    position: fixed;
+    inset: 0;
+    background:
+        linear-gradient(rgba(0,0,0,0.78), rgba(0,0,0,0.78)),
+        url("/images/YSSbgweb.png") center/cover no-repeat;
+    filter: blur(3px);
+    transform: scale(1.05);
+    z-index: 0;
 }
 
 /* ── Cursor glow blob (login page only — mounted/removed by LoginForm) ── */

@@ -1,7 +1,10 @@
 'use client';
+// FILE: app/(public)/login/LoginForm.tsx
 
 import { useEffect, useRef, useState } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { createClient } from '@/utils/supabase/client';
+import { ICONS } from '@/lib/icons';
 
 export default function LoginForm() {
   const glowRef = useRef<HTMLDivElement>(null);
@@ -78,7 +81,7 @@ export default function LoginForm() {
           onClick={handleDiscordSignIn}
           disabled={loading}
         >
-          <i className="fa-brands fa-discord" />
+          <FontAwesomeIcon icon={ICONS.discord} />
           {loading ? ' Redirecting…' : ' Continue with Discord'}
         </button>
 

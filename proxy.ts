@@ -1,12 +1,13 @@
-import type { NextRequest } from 'next/server'
-import { updateSession } from '@/utils/supabase/middleware'
+// FILE: proxy.ts (was middleware.ts, renamed for Next.js 16)
+import { type NextRequest } from 'next/server';
+import { updateSession } from '@/utils/supabase/middleware';
 
 export async function proxy(request: NextRequest) {
-  return updateSession(request)
+  return await updateSession(request);
 }
 
 export const config = {
   matcher: [
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
-}
+};
