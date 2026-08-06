@@ -55,6 +55,11 @@ export default function LoginForm() {
       provider: 'discord',
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
+        // queryParams.scope alone — having both this AND options.scopes set
+        // may have been causing Supabase to merge rather than replace.
+        queryParams: {
+          scope: 'identify guilds.members.read',
+        },
       },
     });
 
