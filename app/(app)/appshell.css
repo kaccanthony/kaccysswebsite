@@ -1,5 +1,15 @@
 /* FILE: app/(app)/app-shell.css */
 /* ── Topbar ── */
+.topbar-hover-zone {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 6px;
+    z-index: 300; /* above the topbar (100) and the popup (200) */
+    cursor: default;
+}
+
 .topbar {
     position: fixed;
     top: 0; left: 0; right: 0;
@@ -9,12 +19,17 @@
     align-items: center;
     gap: 14px;
     padding: 0 28px;
-    background: linear-gradient(135deg, rgba(255,255,255,0.10), rgba(255,255,255,0.03));
+    background: linear-gradient(135deg, rgba(18,18,18,0.90), rgba(12,12,12,0.86));
     backdrop-filter: blur(24px) saturate(180%);
     -webkit-backdrop-filter: blur(24px) saturate(180%);
     border-bottom: 1px solid rgba(255,255,255,0.14);
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.14);
     user-select: none;
+    transition: transform 0.3s ease;
+}
+
+.topbar.topbar-hidden {
+    transform: translateY(-100%);
 }
 
 /* ── Logo with breathing pulse ── */
@@ -69,7 +84,6 @@
     display: flex;
     align-items: center;
     gap: 14px;
-    flex: 1;
     text-decoration: none;
     color: inherit;
     cursor: pointer;
@@ -81,7 +95,8 @@
 
 /* ── Profile button ── */
 .topbar-right {
-    position: relative;
+    position: absolute;
+    right: 1.5vw;
 }
 
 .profile-btn {

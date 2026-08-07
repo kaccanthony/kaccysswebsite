@@ -1,0 +1,33 @@
+/* FILE: app/active/active.css */
+:root{
+  --bg:#080808;
+  --panel:rgba(255,255,255,0.05);
+  --border:rgba(255,255,255,0.10);
+  --border-strong:rgba(255,255,255,0.18);
+  --text-dim:rgba(255,255,255,0.55);
+  --text-faint:rgba(255,255,255,0.32);
+  --live:#4ade80;
+  --header-h:64px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html,body{min-height:100vh;font-family:'Inter',sans-serif;background:var(--bg);color:#fff;}
+#bg{position:fixed;inset:0;background:linear-gradient(rgba(0,0,0,0.82),rgba(0,0,0,0.82)),url("/images/YSSbgweb.png") center/cover no-repeat;filter:blur(3px);scale:1.05;z-index:0;}
+
+main{position:relative;z-index:1;padding:calc(var(--header-h) + 26px) 28px 60px;max-width:1200px;margin:0 auto;}
+.session-head{margin-bottom:18px;}
+.session-title{font-family:'Libre Baskerville',serif;font-size:1.5rem;font-weight:600;}
+.session-sub{font-size:.78rem;color:var(--text-dim);margin-top:4px;}
+
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:16px;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);overflow:hidden;}
+.panel-title{padding:12px 20px;font-size:.72rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.55);background:rgba(255,255,255,.04);border-bottom:1px solid var(--border);}
+
+.table-wrap{overflow-x:auto;}
+.public-table{width:100%;border-collapse:collapse;font-size:.85rem;}
+.public-table thead th{background:#141414;color:rgba(255,255,255,.55);font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;font-weight:600;padding:12px 14px;border-bottom:1px solid var(--border-strong);text-align:left;}
+.public-table tbody td{padding:11px 14px;border-bottom:1px solid var(--border);color:rgba(255,255,255,.85);}
+.public-table tbody tr:hover{background:rgba(255,255,255,.03);}
+.public-table tbody tr:nth-child(even){background:rgba(255,255,255,.015);}
+.chk-cell svg{color:var(--text-faint);}
+.chk-cell svg.done{color:var(--live);}
+
+.empty-state{text-align:center;padding:60px 0;color:var(--text-faint);font-size:.9rem;display:flex;align-items:center;justify-content:center;gap:10px;}

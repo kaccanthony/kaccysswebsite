@@ -98,10 +98,13 @@
     cursor: pointer;
 }
 .btn-clear-link {
-    display: flex; align-items: center;
+    display: flex; align-items: center; gap: 6px;
     color: rgba(255,255,255,0.45);
     font-size: 0.83rem;
-    text-decoration: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
     padding: 0 6px;
 }
 .btn-clear-link:hover { color: #fff; }

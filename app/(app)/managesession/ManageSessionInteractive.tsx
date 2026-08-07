@@ -1,10 +1,11 @@
 // FILE: app/(app)/managesession/ManageSessionInteractive.tsx
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faPen, faTrash, faTimes, faCrown, faPlus, faEnvelopeOpenText,
+  faMagnifyingGlass, faXmark,
 } from '@fortawesome/free-solid-svg-icons';
 import { saveSession, deleteSession } from './actions';
 
@@ -103,7 +104,36 @@ export default function ManageSessionInteractive({
   const [numSlots, setNumSlots] = useState(4);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
 
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [hostFilter, setHostFilter] = useState('');
+
   const isRequestMode = rawRole === 'Head Staff' && permLevel < 20;
+
+  const filteredSessions = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const h = hostFilter.trim().toLowerCase();
+
+    return sessions.filter((s) => {
+      if (statusFilter && s.session_status !== statusFilter) return false;
+      if (h && !s.host.toLowerCase().includes(h)) return false;
+      if (q) {
+        const matchesId = String(s.session_id).includes(q);
+        const matchesHost = s.host.toLowerCase().includes(q);
+        const matchesName = (s.session_name ?? '').toLowerCase().includes(q);
+        if (!matchesId && !matchesHost && !matchesName) return false;
+      }
+      return true;
+    });
+  }, [sessions, search, statusFilter, hostFilter]);
+
+  const hasActiveFilter = search || statusFilter || hostFilter;
+
+  function clearFilters() {
+    setSearch('');
+    setStatusFilter('');
+    setHostFilter('');
+  }
 
   function openAdd() {
     setEditing(null);
@@ -124,7 +154,11 @@ export default function ManageSessionInteractive({
       <div className="page-header">
         <div>
           <div className="section-label">Manage Sessions</div>
-          <p className="section-sub">{sessions.length} session{sessions.length !== 1 ? 's' : ''} total</p>
+          <p className="section-sub">
+            {hasActiveFilter
+              ? `${filteredSessions.length} of ${sessions.length} session${sessions.length !== 1 ? 's' : ''}`
+              : `${sessions.length} session${sessions.length !== 1 ? 's' : ''} total`}
+          </p>
         </div>
         {permLevel >= 10 && (
           <button className="btn-primary" onClick={openAdd}>
@@ -134,9 +168,41 @@ export default function ManageSessionInteractive({
         )}
       </div>
 
+      <div className="filter-bar">
+        <div className="search-wrap">
+          <FontAwesomeIcon icon={faMagnifyingGlass} className="search-icon" />
+          <input
+            type="text"
+            className="search-input"
+            placeholder="Search by ID, host, or session name…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            autoComplete="off"
+          />
+        </div>
+        <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="">All Statuses</option>
+          {['Requested', 'Scheduled', 'Booked', 'Cancelled', 'Postponed'].map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+        <input
+          type="text"
+          className="filter-input"
+          placeholder="Filter by host…"
+          value={hostFilter}
+          onChange={(e) => setHostFilter(e.target.value)}
+        />
+        {hasActiveFilter && (
+          <button type="button" className="btn-clear-link" onClick={clearFilters}>
+            <FontAwesomeIcon icon={faXmark} /> Clear
+          </button>
+        )}
+      </div>
+
       <div className="table-wrap">
-        {sessions.length === 0 ? (
-          <div className="empty-state"><p>No sessions found.</p></div>
+        {filteredSessions.length === 0 ? (
+          <div className="empty-state"><p>{hasActiveFilter ? 'No sessions match your filters.' : 'No sessions found.'}</p></div>
         ) : (
           <table className="session-table">
             <thead>
@@ -147,7 +213,7 @@ export default function ManageSessionInteractive({
               </tr>
             </thead>
             <tbody>
-              {sessions.map((s) => {
+              {filteredSessions.map((s) => {
                 const filled = Array.from({ length: 10 }, (_, i) => s[`trainee_${i + 1}_name`]).filter(Boolean).length;
                 return (
                   <tr key={s.session_id}>

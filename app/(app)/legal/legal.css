@@ -1,0 +1,134 @@
+/* FILE: app/legal/legal.css */
+
+/* ── Background: same photo as the rest of the site, but blurred harder
+   and darkened more so it reads as a quiet backdrop, not a glass panel ── */
+.bg-legal {
+    position: fixed;
+    inset: 0;
+    background:
+        linear-gradient(rgba(0, 0, 0, 0.86), rgba(0, 0, 0, 0.86)),
+        url('/images/YSSbgweb.png') center / cover no-repeat;
+    filter: blur(18px);
+    transform: scale(1.08);
+    z-index: 0;
+}
+
+.legal-page {
+    position: relative;
+    z-index: 1;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 64px 20px 56px;
+}
+
+.legal-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 28px;
+    text-decoration: none;
+    color: rgba(255, 255, 255, 0.82);
+}
+.legal-header:hover { color: #fff; }
+.legal-header img {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+.legal-header span {
+    font-family: 'Libre Baskerville', serif;
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+/* ── The reading surface itself: solid, not glassy ── */
+.legal-card {
+    width: min(760px, 100%);
+    background: rgba(13, 13, 13, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 52px 56px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.legal-title {
+    font-family: 'Libre Baskerville', serif;
+    font-size: 1.85rem;
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: 0.01em;
+    margin-bottom: 8px;
+}
+
+.legal-updated {
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.38);
+    margin-bottom: 40px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.legal-h2 {
+    font-family: 'Libre Baskerville', serif;
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: #fff;
+    margin: 40px 0 14px;
+    letter-spacing: 0.01em;
+}
+.legal-card > .legal-h2:first-of-type { margin-top: 0; }
+
+.legal-h3 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.90);
+    margin: 24px 0 10px;
+}
+
+.legal-p {
+    font-size: 0.88rem;
+    line-height: 1.75;
+    color: rgba(255, 255, 255, 0.68);
+    margin-bottom: 14px;
+}
+
+.legal-list {
+    margin: 0 0 16px 0;
+    padding-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.legal-list li {
+    font-size: 0.88rem;
+    line-height: 1.65;
+    color: rgba(255, 255, 255, 0.68);
+}
+
+.legal-footer-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    justify-content: center;
+    margin-top: 32px;
+}
+.legal-footer-nav a {
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.45);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+}
+.legal-footer-nav a:hover {
+    color: rgba(255, 255, 255, 0.85);
+    border-bottom-color: rgba(255, 255, 255, 0.3);
+}
+
+@media (max-width: 640px) {
+    .legal-page { padding: 48px 12px 40px; }
+    .legal-card { padding: 32px 24px; border-radius: 14px; }
+    .legal-title { font-size: 1.5rem; }
+}

@@ -30,8 +30,13 @@ export default function AppShell({
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const [hidden, setHidden] = useState(false);
   const popupRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const lastScrollY = useRef(0);
+  const ticking = useRef(false);
+  const hoverHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverRevealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const router = useRouter();
 
   // ── Ported from dashboard.js: close on outside click / Escape ──
@@ -57,6 +62,67 @@ export default function AppShell({
     };
   }, []);
 
+  // ── Hide header on scroll-down, reveal on scroll-up ──
+  useEffect(() => {
+    lastScrollY.current = window.scrollY;
+
+    function onScroll() {
+      if (ticking.current) return;
+      ticking.current = true;
+      requestAnimationFrame(() => {
+        const currentY = window.scrollY;
+        const delta = currentY - lastScrollY.current;
+
+        // ignore tiny jitters; only react to a deliberate scroll in one direction
+        if (delta > 6 && currentY > 96) {
+          setHidden(true);
+          setOpen(false); // don't leave the popup floating with no header
+          lastScrollY.current = currentY;
+        } else if (delta < -6) {
+          setHidden(false);
+          lastScrollY.current = currentY;
+        }
+        ticking.current = false;
+      });
+    }
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // ── Hover the very top edge of the screen to hide/reveal manually:
+  //    header visible + hover top edge for 3s  -> hides
+  //    header hidden  + hover top edge for 1s  -> reveals ──
+  function handleTopEdgeEnter() {
+    if (hidden) {
+      hoverRevealTimer.current = setTimeout(() => setHidden(false), 250);
+    } else {
+      hoverHideTimer.current = setTimeout(() => {
+        setHidden(true);
+        setOpen(false);
+      }, 1000);
+    }
+  }
+
+  function handleTopEdgeLeave() {
+    if (hoverHideTimer.current) {
+      clearTimeout(hoverHideTimer.current);
+      hoverHideTimer.current = null;
+    }
+    if (hoverRevealTimer.current) {
+      clearTimeout(hoverRevealTimer.current);
+      hoverRevealTimer.current = null;
+    }
+  }
+
+  // clear any pending hover timers on unmount
+  useEffect(() => {
+    return () => {
+      if (hoverHideTimer.current) clearTimeout(hoverHideTimer.current);
+      if (hoverRevealTimer.current) clearTimeout(hoverRevealTimer.current);
+    };
+  }, []);
+
   async function handleLogout() {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -68,7 +134,9 @@ export default function AppShell({
     <>
       <div className="bg-app" />
 
-      <header className="topbar">
+      <div className="topbar-hover-zone" onMouseEnter={handleTopEdgeEnter} onMouseLeave={handleTopEdgeLeave} />
+
+      <header className={`topbar${hidden ? ' topbar-hidden' : ''}`}>
         <Link href="/dashboard" className="logo-link">
           <div className="logo-wrap">
             <div className="pulse-ring" />
