@@ -87,6 +87,7 @@ export default async function ManageSessionPage({
         staff={staff}
         rawRole={user.rawRole}
         permLevel={user.permLevel}
+        success={params.success}
       />
     </>
   );

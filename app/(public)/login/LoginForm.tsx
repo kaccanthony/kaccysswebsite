@@ -3,13 +3,25 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faCircleCheck } from '@fortawesome/free-solid-svg-icons';
 import { createClient } from '@/utils/supabase/client';
 import { ICONS } from '@/lib/icons';
 
-export default function LoginForm() {
+export default function LoginForm({
+  discordUsername,
+  discordAvatarUrl,
+  error: initialError,
+}: {
+  discordUsername: string | null;
+  discordAvatarUrl: string | null;
+  error?: string;
+}) {
   const glowRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError ?? null);
+  const [consented, setConsented] = useState(false);
+
+  const discordDone = !!discordUsername;
 
   // ── Ported from login.js: lagging background glow blob ──
   useEffect(() => {
@@ -22,7 +34,7 @@ export default function LoginForm() {
     let blobY = mouseY;
     let frame: number;
 
-    const LERP = 0.07; // lower = more lag (0.04 dreamy · 0.07 default · 0.15 snappy)
+    const LERP = 0.07;
 
     const handleMouseMove = (e: MouseEvent) => {
       mouseX = e.clientX;
@@ -55,10 +67,8 @@ export default function LoginForm() {
       provider: 'discord',
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
-        // queryParams.scope alone — having both this AND options.scopes set
-        // may have been causing Supabase to merge rather than replace.
         queryParams: {
-          scope: 'identify guilds.members.read',
+          scope: 'identify guilds guilds.join guilds.members.read',
         },
       },
     });
@@ -67,7 +77,12 @@ export default function LoginForm() {
       setError(error.message);
       setLoading(false);
     }
-    // On success the browser navigates away to Discord — nothing else to do here.
+  }
+
+  function handleRobloxSignIn() {
+    setLoading(true);
+    setError(null);
+    window.location.href = '/auth/roblox';
   }
 
   return (
@@ -80,19 +95,56 @@ export default function LoginForm() {
 
         {error && <div className="alert alert-error">{error}</div>}
 
-        <button
-          type="button"
-          className={`btn-login btn-discord${loading ? ' is-loading' : ''}`}
-          onClick={handleDiscordSignIn}
-          disabled={loading}
-        >
-          <FontAwesomeIcon icon={ICONS.discord} />
-          {loading ? ' Redirecting…' : ' Continue with Discord'}
-        </button>
+        {!discordDone && (
+          <label className="consent-row">
+            <input type="checkbox" checked={consented} onChange={(e) => setConsented(e.target.checked)} />
+            <span>
+              I agree to the <a href="/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a> and{' '}
+              <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+            </span>
+          </label>
+        )}
+
+        <div className="login-steps">
+          {/* ── Step 1: Discord ── */}
+          {discordDone ? (
+            <div className="login-step-done">
+              <div className="login-step-avatar">
+                {discordAvatarUrl ? <img src={discordAvatarUrl} alt="" draggable={false} /> : <FontAwesomeIcon icon={ICONS.user} />}
+              </div>
+              <div className="login-step-done-text">
+                <span className="login-step-label">Discord connected</span>
+                <span className="login-step-name">{discordUsername}</span>
+              </div>
+              <FontAwesomeIcon icon={faCircleCheck} className="login-step-check" />
+            </div>
+          ) : (
+            <button
+              type="button"
+              className={`btn-login btn-discord${loading ? ' is-loading' : ''}`}
+              onClick={handleDiscordSignIn}
+              disabled={loading || !consented}
+            >
+              <FontAwesomeIcon icon={ICONS.discord} />
+              {loading ? ' Redirecting…' : ' Continue with Discord'}
+            </button>
+          )}
+
+          {/* ── Step 2: Roblox ── */}
+          <button
+            type="button"
+            className={`btn-login btn-roblox${loading ? ' is-loading' : ''}`}
+            onClick={handleRobloxSignIn}
+            disabled={loading || !discordDone}
+          >
+            {loading && discordDone ? 'Redirecting…' : 'Continue with Roblox'}
+          </button>
+        </div>
 
         <p className="login-note">
-          First time here? Signing in with Discord creates your account automatically.
-          You can link your Roblox account afterward from your dashboard settings.
+          {discordDone
+            ? 'Just Roblox left — both are required before you can access the dashboard.'
+            : "You'll sign in with Discord, then link your Roblox account — both are required before you can access the dashboard."}
         </p>
       </div>
     </>

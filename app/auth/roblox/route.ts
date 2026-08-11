@@ -1,4 +1,3 @@
-// Paused in development
 // FILE: app/auth/roblox/route.ts
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
@@ -22,5 +21,5 @@ export async function GET(request: Request) {
     scope: 'openid profile',
   });
 
-  return NextResponse.redirect(`https://apis.roblox.com/oauth/v2/authorize?${params}`);
+  return NextResponse.redirect(`https://apis.roblox.com/oauth/v1/authorize?${params}`);
 }

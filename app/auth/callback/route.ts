@@ -78,7 +78,9 @@ export async function GET(request: Request) {
       // DISCORD_GUILD_ID isn't set yet, or the API call fails for any reason.
       await syncDiscordRoles(supabase, data.session?.provider_token, data.user.id);
 
-      return NextResponse.redirect(`${origin}${next}`);
+      // Back to /login — it checks Roblox status itself and shows the
+      // right step (or redirects to /dashboard if both are already done).
+      return NextResponse.redirect(`${origin}/login`);
     }
   }
 

@@ -1,7 +1,7 @@
-// Paused in development
 // FILE: app/auth/roblox/callback/route.ts
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
+import { getRobloxThumbnailUrl } from '@/lib/robloxThumbnails';
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   }
 
   if (!code) {
-    return NextResponse.redirect(`${origin}/dashboard/settings?error=roblox_cancelled`);
+    return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent('Roblox authorization was cancelled.')}`);
   }
 
   // ── Exchange the authorization code for an access token ──
@@ -35,7 +35,7 @@ export async function GET(request: Request) {
   const token = await tokenRes.json();
 
   if (!token.access_token) {
-    return NextResponse.redirect(`${origin}/dashboard/settings?error=roblox_auth_failed`);
+    return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent('Could not authenticate with Roblox.')}`);
   }
 
   // ── Fetch the Roblox identity ──
@@ -44,15 +44,23 @@ export async function GET(request: Request) {
   });
   const robloxUser = await userRes.json();
 
+  // Bust (chest-up, formal) instead of OAuth's own headshot claim — closer
+  // crop than you want for the topbar. Full-body ('avatar' type) is fetched
+  // on-demand later for things like a staff overview grid, not stored here,
+  // since caching it would go stale the moment someone changes their avatar
+  // without re-linking.
+  const bustUrl = await getRobloxThumbnailUrl(robloxUser.sub, 'avatar-bust');
+
   await supabase
     .from('profiles')
     .update({
       roblox_id: robloxUser.sub,
       roblox_username: robloxUser.preferred_username ?? robloxUser.name,
+      roblox_avatar_url: bustUrl ?? robloxUser.picture ?? null, // fall back to OAuth's headshot if the Thumbnails call fails
       roblox_verified_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
     .eq('id', user.id);
 
-  return NextResponse.redirect(`${origin}/dashboard/settings?success=roblox_linked`);
+  return NextResponse.redirect(`${origin}/dashboard?success=${encodeURIComponent('Roblox account linked.')}`);
 }

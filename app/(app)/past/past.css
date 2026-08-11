@@ -1,0 +1,110 @@
+/* FILE: app/(app)/past/past.css */
+.past-page {
+    font-family: 'Inter', sans-serif;
+    position: relative;
+    z-index: 1;
+}
+
+.page-header { margin-bottom: 24px; display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.section-eyebrow { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; color: rgba(255,255,255,0.4); margin-bottom: 6px; }
+.section-title { font-family: 'Libre Baskerville', serif; font-size: 1.8rem; font-weight: 600; margin-bottom: 6px; }
+.page-sub { font-size: 0.9rem; color: rgba(255,255,255,0.5); display: flex; align-items: center; gap: 8px; }
+
+/* ── View switcher ── */
+.view-switcher { display: flex; gap: 6px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 4px; }
+.view-btn { display: flex; align-items: center; gap: 7px; padding: 8px 14px; border-radius: 9px; border: none; background: transparent; color: rgba(255,255,255,0.5); font-size: 0.8rem; font-family: inherit; cursor: pointer; transition: background .18s, color .18s; }
+.view-btn:hover { color: #fff; }
+.view-btn.active { background: rgba(124,196,255,0.16); color: #7cc4ff; }
+
+/* ── Shared: empty state ── */
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 70px 20px; border-radius: 18px; border: 1px dashed rgba(255,255,255,0.14); color: rgba(255,255,255,0.35); }
+.empty-state svg { font-size: 2rem; opacity: .4; }
+.empty-title { font-size: 1rem; color: rgba(255,255,255,0.6); font-weight: 600; }
+
+/* ── Shared: pills ── */
+.sesh-pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 20px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); font-size: 0.72rem; color: rgba(255,255,255,0.75); white-space: nowrap; }
+.sesh-pill svg { color: rgba(255,255,255,0.4); font-size: 0.68rem; }
+.sesh-pill.pill-host { background: rgba(124,196,255,0.12); border-color: rgba(124,196,255,0.3); color: #bfe0ff; }
+.sesh-pill.pill-host svg { color: #7cc4ff; }
+.sesh-pill.pill-supervisor { background: rgba(190,140,255,0.12); border-color: rgba(190,140,255,0.3); color: #d9c4ff; }
+.sesh-pill.pill-supervisor svg { color: #b98cff; }
+.sesh-pill.pill-id { background: rgba(255,255,255,0.03); color: rgba(255,255,255,0.4); font-family: 'JetBrains Mono', monospace; }
+.pill-fraction-full { color: #8bffb0 !important; }
+
+/* Status pill — color depends on final disposition */
+.status-badge-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; white-space: nowrap; }
+.status-badge-pill.st-concluded { background: rgba(74,222,128,0.12); border: 1px solid rgba(74,222,128,0.3); color: #8bffb0; }
+.status-badge-pill.st-cancelled { background: rgba(255,107,107,0.12); border: 1px solid rgba(255,107,107,0.3); color: #ff9e9e; }
+.status-badge-pill.st-other { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); color: rgba(255,255,255,0.6); }
+
+.relative-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 20px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: rgba(255,255,255,0.55); font-size: 0.72rem; font-weight: 600; white-space: nowrap; }
+
+.sesh-time-line { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; color: rgba(255,255,255,0.5); flex-wrap: wrap; }
+.sesh-time-line .bst-time { color: rgba(255,255,255,0.85); font-weight: 600; }
+
+.sesh-title { font-family: 'Libre Baskerville', serif; font-size: 1.05rem; font-weight: 600; color: #fff; margin: 4px 0 8px; }
+.sesh-desc { font-size: 0.78rem; color: rgba(255,255,255,0.45); line-height: 1.5; margin-bottom: 8px; }
+
+.pill-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+
+/* ── Trainees Trained list ── */
+.trainee-list-block { margin-top: 12px; }
+.trainee-list-label { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(255,255,255,0.35); margin-bottom: 6px; }
+.trainee-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.trainee-chip-sm { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.09); font-size: 0.72rem; color: rgba(255,255,255,0.75); }
+.trainee-chip-sm .zone-tag { color: rgba(255,255,255,0.4); }
+.trainee-chip-sm .trainer-tag { color: #7cc4ff; }
+.no-trainees-msg { font-size: 0.76rem; color: rgba(255,255,255,0.3); font-style: italic; }
+
+/* ═══════════════ GRID VIEW ═══════════════ */
+.grid-view { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+.sesh-tile { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 18px 20px; transition: background .2s, border-color .2s, transform .15s; }
+.sesh-tile:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.18); transform: translateY(-2px); }
+.sesh-tile-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+/* ═══════════════ CARD VIEW ═══════════════ */
+.card-view { display: flex; flex-direction: column; gap: 14px; max-width: 780px; }
+.sesh-fullcard { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 18px; padding: 22px 24px; }
+.sesh-fullcard .sesh-title { font-size: 1.2rem; }
+.sesh-fullcard .pill-row { margin-top: 14px; gap: 8px; }
+.sesh-fullcard .sesh-pill { padding: 6px 12px; font-size: 0.76rem; }
+
+/* ═══════════════ LIST VIEW ═══════════════ */
+.list-view { display: flex; flex-direction: column; border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; overflow: hidden; }
+.sesh-row { display: flex; align-items: flex-start; gap: 16px; padding: 12px 18px; background: rgba(255,255,255,0.03); border-bottom: 1px solid rgba(255,255,255,0.07); }
+.sesh-row:last-child { border-bottom: none; }
+.sesh-row:hover { background: rgba(255,255,255,0.06); }
+.sesh-row-time { flex: 0 0 110px; font-size: 0.78rem; color: rgba(255,255,255,0.6); padding-top: 2px; }
+.sesh-row-time .bst-time { display: block; color: #fff; font-weight: 600; font-size: 0.82rem; }
+.sesh-row-title { flex: 1 1 auto; min-width: 0; }
+.sesh-row-title .sesh-title { margin: 0 0 4px; font-size: 0.92rem; }
+.sesh-row-pills { display: flex; gap: 6px; flex-wrap: wrap; flex: 0 1 auto; justify-content: flex-end; max-width: 340px; }
+.sesh-row-relative { flex: 0 0 auto; padding-top: 2px; }
+
+/* ═══════════════ FOCUS VIEW ═══════════════ */
+.focus-layout { display: grid; grid-template-columns: 380px 1fr; gap: 24px; align-items: start; }
+.focus-list { display: flex; flex-direction: column; gap: 10px; max-height: calc(100vh - 220px); overflow-y: auto; padding-right: 4px; }
+.focus-card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 14px 16px; cursor: pointer; transition: background .18s, border-color .18s; }
+.focus-card:hover { background: rgba(255,255,255,0.08); }
+.focus-card.active { background: rgba(124,196,255,0.1); border-color: rgba(124,196,255,0.35); }
+.focus-card .sesh-title { font-size: 0.92rem; margin: 4px 0 6px; }
+.focus-detail-panel { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 18px; padding: 30px 34px; min-height: 300px; }
+.focus-detail-panel .sesh-title { font-size: 1.5rem; }
+.focus-detail-panel .pill-row { margin-top: 20px; gap: 10px; }
+.focus-detail-panel .sesh-pill { padding: 8px 14px; font-size: 0.82rem; }
+.focus-detail-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 80px 20px; color: rgba(255,255,255,0.3); }
+.focus-detail-empty svg { font-size: 2rem; opacity: .4; }
+
+@media (max-width: 900px) {
+    .focus-layout { grid-template-columns: 1fr; }
+    .grid-view { grid-template-columns: 1fr; }
+    .sesh-row { flex-wrap: wrap; }
+}
+
+/* ── Mobile ── */
+@media (max-width: 640px) {
+    .page-header { align-items: stretch; }
+    .view-switcher { justify-content: space-between; }
+    .view-btn { font-size: 0.72rem; padding: 8px 10px; }
+    .sesh-row-pills { max-width: none; }
+}

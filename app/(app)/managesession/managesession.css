@@ -87,6 +87,39 @@
 .search-input::placeholder, .filter-input::placeholder { color: rgba(255,255,255,0.32); }
 .filter-select option { background: #1a1a1a; }
 
+.search-suggestions {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    background: linear-gradient(160deg, rgba(30,30,30,0.92), rgba(15,15,15,0.95));
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 12px;
+    padding: 6px;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+    z-index: 50;
+    max-height: 280px;
+    overflow-y: auto;
+}
+.search-suggestion-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    text-align: left;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+}
+.search-suggestion-item:hover { background: rgba(255,255,255,0.08); }
+.suggestion-name { font-size: 0.83rem; font-weight: 500; color: #fff; }
+.suggestion-meta { font-size: 0.72rem; color: rgba(255,255,255,0.40); }
+
 .btn-filter {
     display: flex; align-items: center; gap: 6px;
     padding: 9px 16px;
@@ -141,14 +174,16 @@
 .session-table tr:hover td { background: rgba(255,255,255,0.03); }
 
 .td-id { color: rgba(255,255,255,0.40); font-variant-numeric: tabular-nums; }
-.td-name { display: flex; flex-direction: column; gap: 2px; }
+.td-name { }
+.td-name-inner { display: flex; flex-direction: column; gap: 2px; }
 .session-name { font-weight: 500; }
 .session-desc { font-size: 0.72rem; color: rgba(255,255,255,0.38); }
-.td-host { display: flex; align-items: center; gap: 6px; }
+.td-host { }
+.td-host-inner { display: flex; align-items: center; gap: 6px; }
 .td-host-icon { color: rgba(255,210,80,0.65); font-size: 0.7rem; }
-.td-date { display: flex; flex-direction: column; gap: 1px; }
-.date-main { font-weight: 500; }
-.date-time { font-size: 0.72rem; color: rgba(255,255,255,0.40); }
+.td-date { }
+.date-main { display: block; font-weight: 500; }
+.date-time { display: block; font-size: 0.72rem; color: rgba(255,255,255,0.40); }
 .td-dur { color: rgba(255,255,255,0.55); }
 
 .slots-pill {
@@ -169,7 +204,8 @@
 .badge-cancelled  { background: rgba(255,80,80,0.14);   border: 1px solid rgba(255,80,80,0.30);   color: #ff9090; }
 .badge-postponed  { background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.20); color: rgba(255,255,255,0.65); }
 
-.td-actions { display: flex; gap: 6px; }
+.td-actions { }
+.td-actions-inner { display: flex; gap: 6px; }
 .action-btn {
     width: 30px; height: 30px;
     border-radius: 8px;
@@ -289,6 +325,8 @@
 }
 .toggle-wrap input:checked + .toggle-track { background: rgba(80,255,140,0.55); }
 .toggle-wrap input:checked + .toggle-track .toggle-thumb { transform: translateX(16px); }
+.toggle-disabled { opacity: 0.4; cursor: not-allowed; }
+.toggle-disabled .toggle-track { cursor: not-allowed; }
 
 .trainee-slot {
     display: flex; flex-direction: column; gap: 8px;

@@ -2,11 +2,14 @@
 // FILE: app/(app)/AppShell.tsx
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/utils/supabase/client';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { ICONS } from '@/lib/icons';
+import { getRoleColor } from '@/lib/roles';
+import { LiveSessionProvider } from './LiveSessionContext';
+import LiveStatusPill from './LiveStatusPill';
 import './appshell.css';
 
 export interface AssignedSession {
@@ -18,17 +21,26 @@ export interface AppShellUser {
   username: string;
   role: string; // formatted display role, e.g. "[OM] Operations Manager"
   avatarUrl: string | null;
+  rawRole: string;
+  isAdmin: boolean;
+  adminRole: string | null;
 }
 
-export default function AppShell({
-  user,
-  assignedSessions,
-  children,
-}: {
+interface AppShellProps {
   user: AppShellUser;
   assignedSessions: AssignedSession[];
   children: React.ReactNode;
-}) {
+}
+
+export default function AppShell(props: AppShellProps) {
+  return (
+    <LiveSessionProvider>
+      <AppShellInner {...props} />
+    </LiveSessionProvider>
+  );
+}
+
+function AppShellInner({ user, assignedSessions, children }: AppShellProps) {
   const [open, setOpen] = useState(false);
   const [hidden, setHidden] = useState(false);
   const popupRef = useRef<HTMLDivElement>(null);
@@ -38,6 +50,9 @@ export default function AppShell({
   const hoverHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverRevealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const router = useRouter();
+  const pathname = usePathname();
+  const isActiveRoute = pathname === '/active';
+  const roleColor = getRoleColor(user.rawRole, user.isAdmin, user.adminRole);
 
   // ── Ported from dashboard.js: close on outside click / Escape ──
   useEffect(() => {
@@ -90,9 +105,7 @@ export default function AppShell({
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  // ── Hover the very top edge of the screen to hide/reveal manually:
-  //    header visible + hover top edge for 3s  -> hides
-  //    header hidden  + hover top edge for 1s  -> reveals ──
+  // ── Hover the very top edge of the screen to hide/reveal manually ──
   function handleTopEdgeEnter() {
     if (hidden) {
       hoverRevealTimer.current = setTimeout(() => setHidden(false), 250);
@@ -147,6 +160,8 @@ export default function AppShell({
         </Link>
 
         <div className="topbar-right">
+          {isActiveRoute && <LiveStatusPill />}
+
           <button
             ref={btnRef}
             className="profile-btn"
@@ -156,7 +171,7 @@ export default function AppShell({
               setOpen((o) => !o);
             }}
           >
-            <div className="avatar">
+            <div className="avatar" style={{ background: roleColor }}>
               {user.avatarUrl ? <img src={user.avatarUrl} alt="Avatar" draggable={false} /> : <FontAwesomeIcon icon={ICONS.user} />}
             </div>
             <div className="profile-meta">
@@ -168,7 +183,7 @@ export default function AppShell({
 
           <div ref={popupRef} className={`profile-popup${open ? ' open' : ''}`}>
             <div className="popup-header">
-              <div className="popup-avatar">
+              <div className="popup-avatar" style={{ background: roleColor }}>
                 {user.avatarUrl ? <img src={user.avatarUrl} alt="Avatar" draggable={false} /> : <FontAwesomeIcon icon={ICONS.user} />}
               </div>
               <div>

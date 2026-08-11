@@ -68,7 +68,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <AppShell user={{ username: displayName, role: roleLabel, avatarUrl: user.avatarUrl }} assignedSessions={assignedSessions}>
+      <AppShell
+        user={{
+          username: displayName,
+          role: roleLabel,
+          avatarUrl: user.robloxAvatarUrl ?? user.avatarUrl,
+          rawRole: user.rawRole,
+          isAdmin: user.isAdmin,
+          adminRole: user.adminRole,   // <-- add this line
+        }}
+        assignedSessions={assignedSessions}
+      >
       {children}
     </AppShell>
   );

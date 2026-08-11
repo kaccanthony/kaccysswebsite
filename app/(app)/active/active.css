@@ -11,12 +11,26 @@
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 html,body{min-height:100vh;font-family:'Inter',sans-serif;background:var(--bg);color:#fff;}
-#bg{position:fixed;inset:0;background:linear-gradient(rgba(0,0,0,0.82),rgba(0,0,0,0.82)),url("/images/YSSbgweb.png") center/cover no-repeat;filter:blur(3px);scale:1.05;z-index:0;}
+/* No #bg here — the (app) layout's AppShell already renders the shared blurred background. */
 
 main{position:relative;z-index:1;padding:calc(var(--header-h) + 26px) 28px 60px;max-width:1200px;margin:0 auto;}
-.session-head{margin-bottom:18px;}
+
+.session-topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:22px;}
+.session-topbar-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+
+.session-head{margin-bottom:0;}
 .session-title{font-family:'Libre Baskerville',serif;font-size:1.5rem;font-weight:600;}
 .session-sub{font-size:.78rem;color:var(--text-dim);margin-top:4px;}
+
+/* live-pill / live-dot / sync-note / live-status live in ../appshell.css now —
+   they're shared between this page and AppShell's header (same <LiveStatusPill/>
+   component renders in both places), so defining them here too would just
+   create two competing rule sets loaded on the same page. */
+
+@media (max-width:640px){
+    .session-topbar{flex-direction:column;align-items:stretch;}
+    .session-topbar-right{justify-content:space-between;}
+}
 
 .panel{background:var(--panel);border:1px solid var(--border);border-radius:16px;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);overflow:hidden;}
 .panel-title{padding:12px 20px;font-size:.72rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.55);background:rgba(255,255,255,.04);border-bottom:1px solid var(--border);}
