@@ -705,7 +705,7 @@ export default function ManageSessionInteractive({
                       {ihField && (
                         <label className="ih-check">
                           <input type="checkbox" name={ihField} defaultChecked={editing ? hasIH(editing.staffRows, code) : false} />
-                          Also Internal Helper
+                          Internal Helper
                         </label>
                       )}
                     </div>
