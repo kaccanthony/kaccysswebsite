@@ -352,3 +352,89 @@
     .table-wrap { overflow-x: auto; }
     .session-table { min-width: 700px; }
 }
+/* ── Additional staff dynamic rows ── */
+.additional-staff-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.additional-staff-row input {
+    flex: 1;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 8px;
+    padding: 8px 10px;
+    color: #fff;
+    font-size: 0.83rem;
+}
+.row-remove-btn {
+    width: 34px;
+    flex-shrink: 0;
+    border-radius: 8px;
+    border: 1px solid rgba(255,80,80,0.25);
+    background: rgba(255,60,60,0.10);
+    color: #ff9090;
+    cursor: pointer;
+}
+.row-remove-btn:hover { background: rgba(255,60,60,0.20); }
+.btn-add-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    padding: 7px 12px;
+    margin-top: 2px;
+}
+
+/* ── Internal Helper checkbox next to Co-Host 3/4 ── */
+.ih-check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 0.72rem;
+    color: rgba(255,255,255,0.50);
+    cursor: pointer;
+}
+
+/* ── Trainee slot header + paste button ── */
+.trainee-slot-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+.btn-paste {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.72rem;
+    padding: 5px 10px;
+    border-radius: 7px;
+    border: 1px solid rgba(255,255,255,0.16);
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.70);
+    cursor: pointer;
+}
+.btn-paste:hover { background: rgba(255,255,255,0.12); color: #fff; }
+
+/* ── Paste-prefill popup ── */
+.paste-textarea {
+    width: 100%;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 10px;
+    padding: 12px;
+    color: #fff;
+    font-size: 0.80rem;
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    line-height: 1.5;
+    resize: vertical;
+    margin-bottom: 12px;
+}
+.paste-textarea::placeholder { color: rgba(255,255,255,0.28); white-space: pre-line; }
+.paste-warning {
+    background: rgba(255,190,80,0.12);
+    border: 1px solid rgba(255,190,80,0.28);
+    color: #ffcc80;
+}

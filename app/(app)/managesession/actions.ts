@@ -139,6 +139,7 @@ export async function saveSession(formData: FormData) {
     session_date: sessionDate,
     session_time: sessionTime,
     additional_notes: (formData.get('additional_notes') as string) || null,
+    trainee_timer: parseInt((formData.get('trainee_timer') as string) || '10', 10)
   };
 
   let sessionId: number;

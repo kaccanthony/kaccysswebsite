@@ -5,9 +5,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faPen, faTrash, faTimes, faCrown, faPlus, faEnvelopeOpenText,
-  faMagnifyingGlass, faXmark,
+  faMagnifyingGlass, faXmark, faClipboard,
 } from '@fortawesome/free-solid-svg-icons';
 import { saveSession, deleteSession } from './actions';
+import { parseTraineePaste, looksLikeSameDate } from './parseTraineePaste';
+import { lookupKnownTrainee } from './traineeActions';
 
 const DRAFT_KEY = 'managesession_draft';
 
@@ -24,6 +26,25 @@ export interface StaffOption {
   ih_auth: boolean;
 }
 
+export interface StaffChildRow {
+  role: string;
+  staff_name: string;
+  attended: boolean;
+  notes: string | null;
+}
+
+export interface TraineeChildRow {
+  slot_number: number;
+  is_standby: boolean;
+  trainee_roblox_username: string | null;
+  trainee_discord: string | null;
+  trainee_discord_id: string | null;
+  zone: number | null;
+  note: string | null;
+  trainer_name: string | null;
+  attended: boolean;
+}
+
 export interface SessionRow {
   session_id: number;
   session_name: string | null;
@@ -34,18 +55,23 @@ export interface SessionRow {
   num_slots: number;
   session_date: string;
   session_time: string;
+  trainer_assignment_mode: string;
+  additional_notes: string | null;
   trainee_timer: number;
-  host: string;
-  co_host1: string | null;
-  co_host2: string | null;
-  co_host3: string | null;
-  co_host4_supervisor: string | null;
-  assistant_1: string | null;
-  assistant_2: string | null;
-  assistant_3: string | null;
-  assistant_4: string | null;
-  additional_staff: string | null;
-  [key: string]: unknown; // trainee_N_* fields
+  staffRows: StaffChildRow[];
+  traineeRows: TraineeChildRow[];
+}
+
+// Reads a primary role's assigned name from the session_staff rows, e.g.
+// findPrimaryStaff(rows, 'HOST') matches both 'HOST' and 'HOST, IH'.
+function findPrimaryStaff(staffRows: StaffChildRow[], roleCode: string): string {
+  return staffRows.find((r) => r.role === roleCode || r.role.startsWith(`${roleCode},`))?.staff_name ?? '';
+}
+function hasIH(staffRows: StaffChildRow[], roleCode: string): boolean {
+  return staffRows.find((r) => r.role === roleCode || r.role.startsWith(`${roleCode},`))?.role.includes('IH') ?? false;
+}
+function getHostName(s: SessionRow): string {
+  return findPrimaryStaff(s.staffRows, 'HOST');
 }
 
 // Fixed display order for optgroups — Host Authorized and Event Authorized
@@ -183,6 +209,13 @@ export default function ManageSessionInteractive({
   const [statusValue, setStatusValue] = useState('Requested');
   const [bookedValue, setBookedValue] = useState(false);
   const [timeDigits, setTimeDigits] = useState(''); // raw digits only, e.g. "1430" — colon is derived, never stored
+  const [additionalStaffRows, setAdditionalStaffRows] = useState<{ name: string; role: string }[]>([]);
+
+  const [pastePopupSlot, setPastePopupSlot] = useState<number | null>(null);
+  const [pasteText, setPasteText] = useState('');
+  const [pasteError, setPasteError] = useState<string | null>(null);
+  const [pasteWarning, setPasteWarning] = useState<string | null>(null);
+  const [pasteLoading, setPasteLoading] = useState(false);
 
   const formRef = useRef<HTMLFormElement>(null);
   const pendingDraftFillRef = useRef<Record<string, string> | null>(null);
@@ -202,10 +235,10 @@ export default function ManageSessionInteractive({
 
     return sessions.filter((s) => {
       if (statusFilter && s.session_status !== statusFilter) return false;
-      if (h && !s.host.toLowerCase().includes(h)) return false;
+      if (h && !getHostName(s).toLowerCase().includes(h)) return false;
       if (q) {
         const matchesId = String(s.session_id).includes(q);
-        const matchesHost = s.host.toLowerCase().includes(q);
+        const matchesHost = getHostName(s).toLowerCase().includes(q);
         const matchesName = (s.session_name ?? '').toLowerCase().includes(q);
         const matchesDate = dateMatches.includes(s.session_date);
         const matchesTime = timeMatch !== null && s.session_time.slice(0, 5) === timeMatch;
@@ -229,6 +262,7 @@ export default function ManageSessionInteractive({
     setEditing(null);
     setStatusValue('Requested');
     setBookedValue(false);
+    setAdditionalStaffRows([]);
 
     const raw = typeof window !== 'undefined' ? localStorage.getItem(DRAFT_KEY) : null;
     if (raw) {
@@ -238,6 +272,13 @@ export default function ManageSessionInteractive({
         if (data.session_status) setStatusValue(data.session_status);
         setBookedValue(data.session_booked === 'on');
         setTimeDigits((data.session_time ?? '').replace(/\D/g, '').slice(0, 4));
+        if (data.__additionalStaffRows) {
+          try {
+            setAdditionalStaffRows(JSON.parse(data.__additionalStaffRows));
+          } catch {
+            setAdditionalStaffRows([]);
+          }
+        }
         pendingDraftFillRef.current = data; // rest gets filled once the right number of trainee rows exist
       } catch {
         setNumSlots(4);
@@ -251,12 +292,23 @@ export default function ManageSessionInteractive({
     setModalOpen(true);
   }
 
+  const PRIMARY_ROLE_CODES = ['HOST', 'CH_1', 'CH_2', 'CH_3', 'CH_4', 'AST_1', 'AST_2', 'AST_3', 'AST_4'];
+
   function openEdit(s: SessionRow) {
     setEditing(s);
     setNumSlots(s.num_slots);
     setStatusValue(s.session_status);
     setBookedValue(s.session_booked);
     setTimeDigits(s.session_time.replace(/\D/g, '').slice(0, 4));
+
+    // Anything in staffRows that ISN'T one of the 9 primary role slots is
+    // additional staff — restore those as dynamic rows (role text with the
+    // "Add T. " prefix stripped back off for display/editing).
+    const additional = s.staffRows
+      .filter((r) => !PRIMARY_ROLE_CODES.some((code) => r.role === code || r.role.startsWith(`${code},`)))
+      .map((r) => ({ name: r.staff_name, role: r.role.replace(/^Add T\.\s*/, '') }));
+    setAdditionalStaffRows(additional);
+
     setModalOpen(true);
   }
 
@@ -274,6 +326,76 @@ export default function ManageSessionInteractive({
     }
   }
 
+  // ── Paste-prefill: parse the pasted block, look up known_trainees if
+  // identity info is missing/partial, and write directly into that
+  // trainee slot's DOM fields (same imperative pattern as the draft-fill
+  // effect below — these are uncontrolled inputs, not React state). ──
+  async function handlePasteFill() {
+    if (pastePopupSlot === null || !formRef.current) return;
+    setPasteError(null);
+    setPasteWarning(null);
+
+    const parsed = parseTraineePaste(pasteText);
+
+    if (!parsed.host || !parsed.dateTime || !parsed.zone) {
+      setPasteError('Missing required field(s) — Host, Date/Time, and Zone must all be present.');
+      return;
+    }
+
+    setPasteLoading(true);
+    let robloxUsername = parsed.robloxUsername;
+    let discordUsername = parsed.discordUsername;
+    let discordId = parsed.discordId;
+
+    // Only look up / require full identity if something's actually missing —
+    // a complete paste never needs to touch known_trainees at all.
+    if (!robloxUsername || !discordUsername || !discordId) {
+      const match = await lookupKnownTrainee(discordId, discordUsername);
+      if (match) {
+        discordId = match.discordId ?? discordId;
+        discordUsername = match.discordUsername || discordUsername;
+        robloxUsername = match.robloxUsername ?? robloxUsername;
+      } else if (!discordId || !discordUsername || !robloxUsername) {
+        setPasteLoading(false);
+        setPasteError(
+          "This trainee isn't in known_trainees yet, so Discord ID, Discord username, and Roblox username are all required in the paste."
+        );
+        return;
+      }
+    }
+    setPasteLoading(false);
+
+    // Soft cross-check only — never blocks filling the form.
+    const form = formRef.current;
+    const currentHost = (form.elements.namedItem('host') as HTMLSelectElement | null)?.value ?? '';
+    const currentDate = (form.elements.namedItem('session_date') as HTMLInputElement | null)?.value ?? '';
+    const warnings: string[] = [];
+    if (currentHost && parsed.host.toLowerCase() !== currentHost.toLowerCase()) {
+      warnings.push(`Pasted host "${parsed.host}" doesn't match this session's host "${currentHost}".`);
+    }
+    if (!looksLikeSameDate(parsed.dateTime, currentDate)) {
+      warnings.push(`Pasted date "${parsed.dateTime}" doesn't look like it matches this session's date.`);
+    }
+
+    const n = pastePopupSlot;
+    const setField = (name: string, value: string) => {
+      const el = form.elements.namedItem(name);
+      if (el instanceof HTMLInputElement) el.value = value;
+    };
+    setField(`trainee_${n}_roblox`, robloxUsername);
+    setField(`trainee_${n}_discord`, discordUsername);
+    setField(`trainee_${n}_discord_id`, discordId);
+    setField(`trainee_${n}_zone`, parsed.zone);
+    if (parsed.position) setField(`trainee_${n}_trainer`, parsed.position);
+    if (parsed.notes) setField(`trainee_${n}_note`, parsed.notes);
+
+    if (warnings.length > 0) {
+      setPasteWarning(warnings.join(' '));
+      return; // leave popup open so they can see the warning before closing
+    }
+    setPastePopupSlot(null);
+  }
+
   // Phase 2 of draft restore — runs once the DOM has caught up to the
   // restored numSlots, so trainee_5+ fields actually exist to fill in.
   useEffect(() => {
@@ -285,7 +407,10 @@ export default function ManageSessionInteractive({
       // session_status/session_booked/session_time are all controlled
       // React state now — setting them here would be immediately
       // overwritten by React's own render, they're handled in openAdd instead.
-      if (key === 'session_status' || key === 'session_booked' || key === 'session_time' || key === 'num_slots' || key === 'action') continue;
+      if (
+        key === 'session_status' || key === 'session_booked' || key === 'session_time' || key === 'num_slots' || key === 'action' ||
+        key === 'additional_staff_name' || key === 'additional_staff_role' || key === '__additionalStaffRows'
+      ) continue;
       const el = form.elements.namedItem(key);
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
         el.value = value;
@@ -301,8 +426,13 @@ export default function ManageSessionInteractive({
     const entries = Array.from(new FormData(formRef.current).entries());
     const data: Record<string, string> = {};
     for (const [key, value] of entries) {
+      // additional_staff_name/role repeat per row — FormData.entries() would
+      // collapse them to just the last one in a flat object, so they're
+      // saved separately below via additionalStaffRows state instead.
+      if (key === 'additional_staff_name' || key === 'additional_staff_role') continue;
       if (typeof value === 'string') data[key] = value;
     }
+    data.__additionalStaffRows = JSON.stringify(additionalStaffRows);
     localStorage.setItem(DRAFT_KEY, JSON.stringify(data));
   }
 
@@ -362,7 +492,7 @@ export default function ManageSessionInteractive({
                 >
                   <span className="suggestion-name">{s.session_name || `Session #${s.session_id}`}</span>
                   <span className="suggestion-meta">
-                    #{s.session_id} · {s.host} · {new Date(`${s.session_date}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} {s.session_time.slice(0, 5)}
+                    #{s.session_id} · {getHostName(s)} · {new Date(`${s.session_date}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} {s.session_time.slice(0, 5)}
                   </span>
                 </button>
               ))}
@@ -403,7 +533,7 @@ export default function ManageSessionInteractive({
             </thead>
             <tbody>
               {filteredSessions.map((s) => {
-                const filled = Array.from({ length: 10 }, (_, i) => s[`trainee_${i + 1}_name`]).filter(Boolean).length;
+                const filled = s.traineeRows.filter((t) => !t.is_standby).length;
                 return (
                   <tr key={s.session_id}>
                     <td className="td-id">#{s.session_id}</td>
@@ -416,7 +546,7 @@ export default function ManageSessionInteractive({
                     <td><span className={`badge ${statusBadgeClass(s.session_status)}`}>{s.session_status}</span></td>
                     <td className="td-host">
                       <div className="td-host-inner">
-                        <FontAwesomeIcon icon={faCrown} className="td-host-icon" /> {s.host}
+                        <FontAwesomeIcon icon={faCrown} className="td-host-icon" /> {getHostName(s)}
                       </div>
                     </td>
                     <td className="td-date">
@@ -551,7 +681,7 @@ export default function ManageSessionInteractive({
                 </div>
                 <div className="form-group">
                   <label>TR. Timer* (min)</label>
-                  <input type="number" name="trainee_timer" min={8} max={20} placeholder="15" defaultValue={editing?.trainee_timer ?? ''} />
+                  <input type="number" name="trainee_timer" min={8} max={20} placeholder="10" defaultValue={editing?.trainee_timer ?? ''} />
                 </div>
               </div>
 
@@ -560,62 +690,159 @@ export default function ManageSessionInteractive({
               <div className="form-row">
                 <div className="form-group flex2">
                   <label><FontAwesomeIcon icon={faCrown} style={{ color: 'rgba(255,210,80,.7)', fontSize: '.7rem', marginRight: 4 }} /> Host*</label>
-                  <StaffSelect name="host" staff={staff} authKey="host_auth" defaultValue={editing?.host} />
+                  <StaffSelect name="host" staff={staff} authKey="host_auth" defaultValue={editing ? findPrimaryStaff(editing.staffRows, 'HOST') : ''} />
                 </div>
               </div>
 
               <div className="form-row">
-                {(['co_host1', 'co_host2', 'co_host3', 'co_host4_supervisor'] as const).map((f, i) => (
-                  <div className="form-group" key={f}>
-                    <label>{i < 3 ? `Co-Host ${i + 1}` : 'Co-Host 4 / SV'}</label>
-                    <StaffSelect name={f} staff={staff} authKey="cohost_auth" defaultValue={editing?.[f] as string} />
-                  </div>
-                ))}
+                {(['co_host1', 'co_host2', 'co_host3', 'co_host4_supervisor'] as const).map((f, i) => {
+                  const code = ['CH_1', 'CH_2', 'CH_3', 'CH_4'][i];
+                  const ihField = i === 2 ? 'co_host3_ih' : i === 3 ? 'co_host4_ih' : null;
+                  return (
+                    <div className="form-group" key={f}>
+                      <label>{i < 3 ? `Co-Host ${i + 1}` : 'Co-Host 4 / SV'}</label>
+                      <StaffSelect name={f} staff={staff} authKey="cohost_auth" defaultValue={editing ? findPrimaryStaff(editing.staffRows, code) : ''} />
+                      {ihField && (
+                        <label className="ih-check">
+                          <input type="checkbox" name={ihField} defaultChecked={editing ? hasIH(editing.staffRows, code) : false} />
+                          Also Internal Helper
+                        </label>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="form-row">
-                {(['assistant_1', 'assistant_2', 'assistant_3', 'assistant_4'] as const).map((f, i) => (
-                  <div className="form-group" key={f}>
-                    <label>Assistant {i + 1}</label>
-                    <StaffSelect name={f} staff={staff} authKey="asst_auth" defaultValue={editing?.[f] as string} />
-                  </div>
-                ))}
+                {(['assistant_1', 'assistant_2', 'assistant_3', 'assistant_4'] as const).map((f, i) => {
+                  const code = ['AST_1', 'AST_2', 'AST_3', 'AST_4'][i];
+                  return (
+                    <div className="form-group" key={f}>
+                      <label>Assistant {i + 1}</label>
+                      <StaffSelect name={f} staff={staff} authKey="asst_auth" defaultValue={editing ? findPrimaryStaff(editing.staffRows, code) : ''} />
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="form-group">
-                <label>Additional Staff <span className="label-hint">(include role after name)</span></label>
-                <input type="text" name="additional_staff" defaultValue={editing?.additional_staff ?? ''} placeholder="e.g. Yoshi5336 [Observer]" />
+                <label>Additional Staff</label>
+                {additionalStaffRows.map((row, i) => (
+                  <div className="additional-staff-row" key={i}>
+                    <input
+                      type="text"
+                      name="additional_staff_name"
+                      placeholder="Name"
+                      value={row.name}
+                      onChange={(e) => {
+                        const next = [...additionalStaffRows];
+                        next[i] = { ...next[i], name: e.target.value };
+                        setAdditionalStaffRows(next);
+                      }}
+                    />
+                    <input
+                      type="text"
+                      name="additional_staff_role"
+                      placeholder="Role (e.g. Observer, IH)"
+                      value={row.role}
+                      onChange={(e) => {
+                        const next = [...additionalStaffRows];
+                        next[i] = { ...next[i], role: e.target.value };
+                        setAdditionalStaffRows(next);
+                      }}
+                    />
+                    <button type="button" className="row-remove-btn" onClick={() => setAdditionalStaffRows(additionalStaffRows.filter((_, j) => j !== i))}>
+                      <FontAwesomeIcon icon={faTimes} />
+                    </button>
+                  </div>
+                ))}
+                <button type="button" className="btn-ghost btn-add-row" onClick={() => setAdditionalStaffRows([...additionalStaffRows, { name: '', role: '' }])}>
+                  <FontAwesomeIcon icon={faPlus} /> Add Staff
+                </button>
               </div>
 
               <div className="form-divider"><span>Trainee Assignment</span></div>
 
-              {slotArray.map((n) => (
-                <div className="trainee-slot" key={n}>
-                  <div className="trainee-slot-label">Trainee {n}</div>
-                  <div className="form-row">
-                    <div className="form-group flex2">
-                      <label>Roblox Username</label>
-                      <input type="text" name={`trainee_${n}_name`} defaultValue={(editing?.[`trainee_${n}_name`] as string) ?? ''} />
+              {slotArray.map((n) => {
+                const t = editing?.traineeRows.find((row) => row.slot_number === n);
+                return (
+                  <div className="trainee-slot" key={n}>
+                    <div className="trainee-slot-header">
+                      <div className="trainee-slot-label">Trainee {n}</div>
+                      <button
+                        type="button"
+                        className="btn-paste"
+                        onClick={() => {
+                          setPasteText('');
+                          setPasteError(null);
+                          setPasteWarning(null);
+                          setPastePopupSlot(n);
+                        }}
+                      >
+                        <FontAwesomeIcon icon={faClipboard} /> Paste
+                      </button>
                     </div>
-                    <div className="form-group flex2">
-                      <label>Discord Username</label>
-                      <input type="text" name={`trainee_${n}_discord`} defaultValue={(editing?.[`trainee_${n}_discord`] as string) ?? ''} />
+                    <div className="form-row">
+                      <div className="form-group flex2">
+                        <label>Roblox Username</label>
+                        <input type="text" name={`trainee_${n}_roblox`} defaultValue={t?.trainee_roblox_username ?? ''} />
+                      </div>
+                      <div className="form-group flex2">
+                        <label>Discord Username</label>
+                        <input type="text" name={`trainee_${n}_discord`} defaultValue={t?.trainee_discord ?? ''} />
+                      </div>
+                      <div className="form-group">
+                        <label>Discord ID</label>
+                        <input type="text" name={`trainee_${n}_discord_id`} defaultValue={t?.trainee_discord_id ?? ''} />
+                      </div>
+                      <div className="form-group">
+                        <label>Zone</label>
+                        <input type="number" name={`trainee_${n}_zone`} defaultValue={t?.zone ?? ''} />
+                      </div>
                     </div>
-                    <div className="form-group">
-                      <label>Discord ID</label>
-                      <input type="text" name={`trainee_${n}_discord_id`} defaultValue={(editing?.[`trainee_${n}_discord_id`] as string) ?? ''} />
-                    </div>
-                    <div className="form-group">
-                      <label>Zone</label>
-                      <input type="number" name={`trainee_${n}_zone`} defaultValue={(editing?.[`trainee_${n}_zone`] as number) ?? ''} />
+                    <div className="form-row">
+                      <div className="form-group flex2">
+                        <label>Trainer</label>
+                        <input type="text" name={`trainee_${n}_trainer`} defaultValue={t?.trainer_name ?? ''} />
+                      </div>
+                      <div className="form-group flex2">
+                        <label>Note</label>
+                        <input type="text" name={`trainee_${n}_note`} defaultValue={t?.note ?? ''} />
+                      </div>
                     </div>
                   </div>
-                  <div className="form-group">
-                    <label>Note</label>
-                    <input type="text" name={`trainee_${n}_note`} defaultValue={(editing?.[`trainee_${n}_note`] as string) ?? ''} />
+                );
+              })}
+
+              {/* ══ PASTE-PREFILL POPUP ══ */}
+              {pastePopupSlot !== null && (
+                <div className="modal-backdrop paste-popup-backdrop" onClick={() => setPastePopupSlot(null)}>
+                  <div className="modal-box modal-sm" onClick={(e) => e.stopPropagation()}>
+                    <div className="modal-header">
+                      <h2 className="modal-title">Paste Trainee {pastePopupSlot} Details</h2>
+                      <button className="modal-close-btn" onClick={() => setPastePopupSlot(null)}><FontAwesomeIcon icon={faTimes} /></button>
+                    </div>
+
+                    <textarea
+                      className="paste-textarea"
+                      rows={9}
+                      placeholder={'[Trainee discord ID]\n[Trainee discord username]\n[Trainee roblox username]\n`Host:` [HOST]\n`Date/Time:` DD/MM/YYYY HH:MM\n`Position:` [Position]\n`Zone:` [Zone]\n`Trainee Notes:` [optional]'}
+                      value={pasteText}
+                      onChange={(e) => setPasteText(e.target.value)}
+                    />
+
+                    {pasteError && <div className="alert alert-error">{pasteError}</div>}
+                    {pasteWarning && <div className="alert paste-warning">{pasteWarning}</div>}
+
+                    <div className="modal-footer">
+                      <button type="button" className="btn-ghost" onClick={() => setPastePopupSlot(null)}>Cancel</button>
+                      <button type="button" className="btn-primary" disabled={pasteLoading} onClick={handlePasteFill}>
+                        {pasteLoading ? 'Checking…' : 'Fill Trainee'}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              ))}
+              )}
 
               <div className="modal-footer">
                 <button type="button" className="btn-ghost" onClick={() => setModalOpen(false)}>Cancel</button>

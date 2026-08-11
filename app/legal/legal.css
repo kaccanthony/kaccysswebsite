@@ -132,3 +132,9 @@
     .legal-card { padding: 32px 24px; border-radius: 14px; }
     .legal-title { font-size: 1.5rem; }
 }
+
+/* When rendered inside AppShell (logged-in visitor), AppShell's own .main wrapper already
+   supplies top padding for the fixed header — don't stack a second one on top of it. */
+.legal-page-authed {
+    padding-top: 0;
+}
