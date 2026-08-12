@@ -9,7 +9,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { saveSession, deleteSession } from './actions';
 import { parseTraineePaste, looksLikeSameDate } from './parseTraineePaste';
-import { lookupKnownTrainee } from './traineeActions';
+import { lookupKnownTrainee, searchKnownTrainees, type KnownTraineeMatch } from './traineeActions';
 
 const DRAFT_KEY = 'managesession_draft';
 
@@ -57,9 +57,9 @@ export interface SessionRow {
   session_time: string;
   trainer_assignment_mode: string;
   additional_notes: string | null;
-  trainee_timer: number;
   staffRows: StaffChildRow[];
   traineeRows: TraineeChildRow[];
+  trainee_timer: number | null;
 }
 
 // Reads a primary role's assigned name from the session_staff rows, e.g.
@@ -211,11 +211,17 @@ export default function ManageSessionInteractive({
   const [timeDigits, setTimeDigits] = useState(''); // raw digits only, e.g. "1430" — colon is derived, never stored
   const [additionalStaffRows, setAdditionalStaffRows] = useState<{ name: string; role: string }[]>([]);
 
-  const [pastePopupSlot, setPastePopupSlot] = useState<number | null>(null);
+  // Inline quick-fill — one slot's panel open at a time, rendered directly
+  // in that slot's own card (no separate modal-on-top-of-modal anymore).
+  const [quickFillSlot, setQuickFillSlot] = useState<number | null>(null);
+  const [quickFillMode, setQuickFillMode] = useState<'search' | 'paste'>('search');
   const [pasteText, setPasteText] = useState('');
   const [pasteError, setPasteError] = useState<string | null>(null);
   const [pasteWarning, setPasteWarning] = useState<string | null>(null);
   const [pasteLoading, setPasteLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<KnownTraineeMatch[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
 
   const formRef = useRef<HTMLFormElement>(null);
   const pendingDraftFillRef = useRef<Record<string, string> | null>(null);
@@ -330,8 +336,23 @@ export default function ManageSessionInteractive({
   // identity info is missing/partial, and write directly into that
   // trainee slot's DOM fields (same imperative pattern as the draft-fill
   // effect below — these are uncontrolled inputs, not React state). ──
+  function setTraineeField(n: number, name: string, value: string) {
+    if (!formRef.current) return;
+    const el = formRef.current.elements.namedItem(`trainee_${n}_${name}`);
+    if (el instanceof HTMLInputElement) el.value = value;
+  }
+
+  function closeQuickFill() {
+    setQuickFillSlot(null);
+    setPasteText('');
+    setPasteError(null);
+    setPasteWarning(null);
+    setSearchQuery('');
+    setSearchResults([]);
+  }
+
   async function handlePasteFill() {
-    if (pastePopupSlot === null || !formRef.current) return;
+    if (quickFillSlot === null || !formRef.current) return;
     setPasteError(null);
     setPasteWarning(null);
 
@@ -377,23 +398,42 @@ export default function ManageSessionInteractive({
       warnings.push(`Pasted date "${parsed.dateTime}" doesn't look like it matches this session's date.`);
     }
 
-    const n = pastePopupSlot;
-    const setField = (name: string, value: string) => {
-      const el = form.elements.namedItem(name);
-      if (el instanceof HTMLInputElement) el.value = value;
-    };
-    setField(`trainee_${n}_roblox`, robloxUsername);
-    setField(`trainee_${n}_discord`, discordUsername);
-    setField(`trainee_${n}_discord_id`, discordId);
-    setField(`trainee_${n}_zone`, parsed.zone);
-    if (parsed.position) setField(`trainee_${n}_trainer`, parsed.position);
-    if (parsed.notes) setField(`trainee_${n}_note`, parsed.notes);
+    const n = quickFillSlot;
+    setTraineeField(n, 'roblox', robloxUsername);
+    setTraineeField(n, 'discord', discordUsername);
+    setTraineeField(n, 'discord_id', discordId);
+    setTraineeField(n, 'zone', parsed.zone);
+    if (parsed.position) setTraineeField(n, 'trainer', parsed.position);
+    if (parsed.notes) setTraineeField(n, 'note', parsed.notes);
 
     if (warnings.length > 0) {
       setPasteWarning(warnings.join(' '));
-      return; // leave popup open so they can see the warning before closing
+      return; // leave panel open so they can see the warning before closing
     }
-    setPastePopupSlot(null);
+    closeQuickFill();
+  }
+
+  // Debounced live search against known_trainees while typing.
+  useEffect(() => {
+    if (quickFillMode !== 'search' || quickFillSlot === null || searchQuery.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    setSearchLoading(true);
+    const timeout = setTimeout(async () => {
+      const results = await searchKnownTrainees(searchQuery);
+      setSearchResults(results);
+      setSearchLoading(false);
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [searchQuery, quickFillMode, quickFillSlot]);
+
+  function handleSearchPick(match: KnownTraineeMatch) {
+    if (quickFillSlot === null) return;
+    setTraineeField(quickFillSlot, 'roblox', match.robloxUsername ?? '');
+    setTraineeField(quickFillSlot, 'discord', match.discordUsername);
+    setTraineeField(quickFillSlot, 'discord_id', match.discordId ?? '');
+    closeQuickFill();
   }
 
   // Phase 2 of draft restore — runs once the DOM has caught up to the
@@ -705,7 +745,7 @@ export default function ManageSessionInteractive({
                       {ihField && (
                         <label className="ih-check">
                           <input type="checkbox" name={ihField} defaultChecked={editing ? hasIH(editing.staffRows, code) : false} />
-                          Internal Helper
+                          Also Internal Helper
                         </label>
                       )}
                     </div>
@@ -765,23 +805,82 @@ export default function ManageSessionInteractive({
 
               {slotArray.map((n) => {
                 const t = editing?.traineeRows.find((row) => row.slot_number === n);
+                const panelOpen = quickFillSlot === n;
                 return (
                   <div className="trainee-slot" key={n}>
                     <div className="trainee-slot-header">
                       <div className="trainee-slot-label">Trainee {n}</div>
-                      <button
-                        type="button"
-                        className="btn-paste"
-                        onClick={() => {
-                          setPasteText('');
-                          setPasteError(null);
-                          setPasteWarning(null);
-                          setPastePopupSlot(n);
-                        }}
-                      >
-                        <FontAwesomeIcon icon={faClipboard} /> Paste
-                      </button>
+                      <div className="trainee-slot-header-right">
+                        <label className="standby-check">
+                          <input type="checkbox" name={`trainee_${n}_standby`} defaultChecked={t?.is_standby ?? false} />
+                          Standby / Reserved
+                        </label>
+                        <button
+                          type="button"
+                          className={`btn-paste${panelOpen ? ' active' : ''}`}
+                          onClick={() => (panelOpen ? closeQuickFill() : (setQuickFillSlot(n), setQuickFillMode('search')))}
+                        >
+                          <FontAwesomeIcon icon={faMagnifyingGlass} /> Quick Fill
+                        </button>
+                      </div>
                     </div>
+
+                    {/* ══ Inline quick-fill panel — search or paste, right in the slot ══ */}
+                    {panelOpen && (
+                      <div className="quick-fill-panel">
+                        <div className="quick-fill-tabs">
+                          <button type="button" className={quickFillMode === 'search' ? 'active' : ''} onClick={() => setQuickFillMode('search')}>
+                            <FontAwesomeIcon icon={faMagnifyingGlass} /> Search
+                          </button>
+                          <button type="button" className={quickFillMode === 'paste' ? 'active' : ''} onClick={() => setQuickFillMode('paste')}>
+                            <FontAwesomeIcon icon={faClipboard} /> Paste
+                          </button>
+                        </div>
+
+                        {quickFillMode === 'search' ? (
+                          <>
+                            <input
+                              type="text"
+                              className="quick-fill-search-input"
+                              placeholder="Search known trainees by Discord or Roblox name…"
+                              value={searchQuery}
+                              onChange={(e) => setSearchQuery(e.target.value)}
+                              autoFocus
+                            />
+                            {searchLoading && <div className="quick-fill-hint">Searching…</div>}
+                            {!searchLoading && searchQuery.trim().length >= 2 && searchResults.length === 0 && (
+                              <div className="quick-fill-hint">No matches in known_trainees — try Paste instead to add them.</div>
+                            )}
+                            {searchResults.length > 0 && (
+                              <div className="quick-fill-results">
+                                {searchResults.map((r) => (
+                                  <button type="button" key={r.discordId ?? r.discordUsername} className="quick-fill-result" onClick={() => handleSearchPick(r)}>
+                                    <span className="qfr-discord">{r.discordUsername}</span>
+                                    {r.robloxUsername && <span className="qfr-roblox">{r.robloxUsername}</span>}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <textarea
+                              className="paste-textarea"
+                              rows={7}
+                              placeholder={'[Trainee discord ID]\n[Trainee discord username]\n[Trainee roblox username]\n`Host:` [HOST]\n`Date/Time:` DD/MM/YYYY HH:MM\n`Position:` [Position]\n`Zone:` [Zone]\n`Trainee Notes:` [optional]'}
+                              value={pasteText}
+                              onChange={(e) => setPasteText(e.target.value)}
+                            />
+                            {pasteError && <div className="alert alert-error">{pasteError}</div>}
+                            {pasteWarning && <div className="alert paste-warning">{pasteWarning}</div>}
+                            <button type="button" className="btn-primary quick-fill-paste-btn" disabled={pasteLoading} onClick={handlePasteFill}>
+                              {pasteLoading ? 'Checking…' : 'Fill Trainee'}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+
                     <div className="form-row">
                       <div className="form-group flex2">
                         <label>Roblox Username</label>
@@ -813,36 +912,6 @@ export default function ManageSessionInteractive({
                   </div>
                 );
               })}
-
-              {/* ══ PASTE-PREFILL POPUP ══ */}
-              {pastePopupSlot !== null && (
-                <div className="modal-backdrop paste-popup-backdrop" onClick={() => setPastePopupSlot(null)}>
-                  <div className="modal-box modal-sm" onClick={(e) => e.stopPropagation()}>
-                    <div className="modal-header">
-                      <h2 className="modal-title">Paste Trainee {pastePopupSlot} Details</h2>
-                      <button className="modal-close-btn" onClick={() => setPastePopupSlot(null)}><FontAwesomeIcon icon={faTimes} /></button>
-                    </div>
-
-                    <textarea
-                      className="paste-textarea"
-                      rows={9}
-                      placeholder={'[Trainee discord ID]\n[Trainee discord username]\n[Trainee roblox username]\n`Host:` [HOST]\n`Date/Time:` DD/MM/YYYY HH:MM\n`Position:` [Position]\n`Zone:` [Zone]\n`Trainee Notes:` [optional]'}
-                      value={pasteText}
-                      onChange={(e) => setPasteText(e.target.value)}
-                    />
-
-                    {pasteError && <div className="alert alert-error">{pasteError}</div>}
-                    {pasteWarning && <div className="alert paste-warning">{pasteWarning}</div>}
-
-                    <div className="modal-footer">
-                      <button type="button" className="btn-ghost" onClick={() => setPastePopupSlot(null)}>Cancel</button>
-                      <button type="button" className="btn-primary" disabled={pasteLoading} onClick={handlePasteFill}>
-                        {pasteLoading ? 'Checking…' : 'Fill Trainee'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
 
               <div className="modal-footer">
                 <button type="button" className="btn-ghost" onClick={() => setModalOpen(false)}>Cancel</button>

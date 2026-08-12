@@ -9,6 +9,27 @@ import './managesession.css';
 
 export const metadata = { title: 'Manage Sessions' };
 
+interface StaffQueryRow {
+  session_id: number;
+  role: string;
+  staff_name: string;
+  attended: boolean;
+  notes: string | null;
+}
+
+interface TraineeQueryRow {
+  session_id: number;
+  slot_number: number;
+  is_standby: boolean;
+  trainee_roblox_username: string | null;
+  trainee_discord: string | null;
+  trainee_discord_id: string | null;
+  zone: number | null;
+  note: string | null;
+  trainer_name: string | null;
+  attended: boolean;
+}
+
 export default async function ManageSessionPage({
   searchParams,
 }: {
@@ -30,19 +51,26 @@ export default async function ManageSessionPage({
 
   const sessionIds = (sessions ?? []).map((s) => s.session_id);
 
-  const [{ data: staffRows }, { data: traineeRows }] = sessionIds.length
+  const [{ data: staffRowsRaw }, { data: traineeRowsRaw }] = sessionIds.length
     ? await Promise.all([
         supabase.from('session_staff').select('*').in('session_id', sessionIds),
         supabase.from('session_trainees').select('*').in('session_id', sessionIds).order('slot_number', { ascending: true }),
       ])
     : [{ data: [] }, { data: [] }];
 
-  const staffBySession = new Map<number, typeof staffRows>();
-  for (const row of staffRows ?? []) {
+  // Cast explicitly instead of trusting Supabase's inferred type here — if
+  // the client is using generated Database types from before these tables
+  // existed, queries against them silently infer as `never`, which is what
+  // was actually causing the "type never" build error.
+  const staffRows = (staffRowsRaw ?? []) as unknown as StaffQueryRow[];
+  const traineeRows = (traineeRowsRaw ?? []) as unknown as TraineeQueryRow[];
+
+  const staffBySession = new Map<number, StaffQueryRow[]>();
+  for (const row of staffRows) {
     if (!staffBySession.has(row.session_id)) staffBySession.set(row.session_id, []);
     staffBySession.get(row.session_id)!.push(row);
   }
-  const traineesBySession = new Map<number, typeof traineeRows>();
+  const traineesBySession = new Map<number, TraineeQueryRow[]>();
   for (const row of traineeRows ?? []) {
     if (!traineesBySession.has(row.session_id)) traineesBySession.set(row.session_id, []);
     traineesBySession.get(row.session_id)!.push(row);
