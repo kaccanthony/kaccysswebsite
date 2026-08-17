@@ -62,6 +62,9 @@ export async function POST(req: NextRequest) {
   if (board.readOnly) {
     return NextResponse.json({ success: false, message: board.readOnlyReason ?? 'This table is read-only here.' }, { status: 403 });
   }
+  if (board.noCreate) {
+    return NextResponse.json({ success: false, message: 'Records on this table can\'t be created here.' }, { status: 403 });
+  }
 
   const data: Record<string, unknown> = {};
   const rawData = body.data ?? {};
@@ -121,6 +124,20 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ success: false, message: 'No editable fields supplied.' });
   }
 
+  // Site Scripts gets a free version-history snapshot on every save, ported here rather than
+  // into a bespoke route since everything else about this board is plain generic CRUD.
+  if (board.table === 'site_scripts' && 'content' in data) {
+    const { data: before } = await supabase.from('site_scripts').select('content').eq('script_key', pkVal).maybeSingle();
+    if (before) {
+      await supabase.from('site_scripts_history').insert({
+        script_key: pkVal,
+        content: before.content,
+        saved_by: user.id,
+      });
+    }
+    data.updated_at = new Date().toISOString();
+  }
+
   const { error } = await supabase.from(board.table).update(data).eq(board.primaryKey, pkVal);
   if (error) return NextResponse.json({ success: false, message: error.message });
   return NextResponse.json({ success: true });
@@ -139,6 +156,9 @@ export async function DELETE(req: NextRequest) {
   }
   if (board.readOnly) {
     return NextResponse.json({ success: false, message: board.readOnlyReason ?? 'This table is read-only here.' }, { status: 403 });
+  }
+  if (board.noDelete) {
+    return NextResponse.json({ success: false, message: 'Records on this table can\'t be deleted here.' }, { status: 403 });
   }
 
   const pkVal = body.pk;

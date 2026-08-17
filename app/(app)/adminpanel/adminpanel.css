@@ -1,0 +1,172 @@
+/* FILE: app/(app)/adminpanel/adminpanel.css */
+/* Reuses .ms-form-group / .mbtn from manage.css (ManageBoard imports that already) — only the
+   card wrapper and the "currently viewing as" state need their own rules. */
+
+.adminpanel-page {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.ap-card {
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 16px;
+    padding: 22px 26px;
+}
+.ap-card-title {
+    font-family: 'Libre Baskerville', serif;
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+.ap-card-sub {
+    font-size: .8rem;
+    color: rgba(255,255,255,.45);
+    margin-bottom: 18px;
+    max-width: 640px;
+}
+
+.ap-viewas-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-width: 420px;
+}
+.ap-viewas-active {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: .85rem;
+    color: rgba(255,255,255,.7);
+}
+.ap-error {
+    font-size: .78rem;
+    color: #ff9090;
+}
+
+.ap-mode-toggle {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+.ap-mode-toggle button {
+    flex: 1;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,.14);
+    background: rgba(255,255,255,.04);
+    color: rgba(255,255,255,.55);
+    font-size: .8rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background .15s, color .15s, border-color .15s;
+}
+.ap-mode-toggle button.active {
+    background: rgba(124,196,255,.14);
+    border-color: rgba(124,196,255,.4);
+    color: #7cc4ff;
+}
+
+.ap-search-results {
+    margin-top: 8px;
+    max-height: 160px;
+    overflow-y: auto;
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 9px;
+    background: rgba(255,255,255,.03);
+}
+.ap-search-result {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    text-align: left;
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid rgba(255,255,255,.06);
+    color: #fff;
+    font-size: .8rem;
+    cursor: pointer;
+    font-family: inherit;
+}
+.ap-search-result:last-child { border-bottom: none; }
+.ap-search-result:hover { background: rgba(124,196,255,.08); }
+.ap-search-result-meta { font-size: .7rem; color: rgba(255,255,255,.4); }
+
+.ap-selected-person {
+    margin-top: 8px;
+    font-size: .78rem;
+    color: #9be8a5;
+}
+
+.ap-auth-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 14px;
+}
+.ap-auth-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 10px; /* was sitting flush against the checkbox before */
+    font-size: .78rem;
+    color: rgba(255,255,255,.75);
+    cursor: pointer;
+}
+
+.ap-auth-checkbox input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    border-radius: 5px;
+    border: 1.5px solid rgba(255,255,255,.25);
+    background: rgba(255,255,255,.04);
+    cursor: pointer;
+    position: relative;
+    transition: background .18s ease, border-color .18s ease, transform .12s ease;
+}
+.ap-auth-checkbox input[type="checkbox"]:hover {
+    border-color: rgba(147,233,190,.55);
+}
+.ap-auth-checkbox input[type="checkbox"]:active {
+    transform: scale(.88);
+}
+.ap-auth-checkbox input[type="checkbox"]:checked {
+    background: #93E9BE;
+    border-color: #93E9BE;
+}
+.ap-auth-checkbox input[type="checkbox"]:checked::after {
+    content: '';
+    position: absolute;
+    left: 5px;
+    top: 1px;
+    width: 5px;
+    height: 9px;
+    border: solid #0a0a0a;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg) scale(0);
+    animation: apCheckIn .18s cubic-bezier(.34,1.3,.4,1) forwards;
+}
+@keyframes apCheckIn {
+    to { transform: rotate(45deg) scale(1); }
+}
+
+.ap-active-auths {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 14px;
+}
+.ap-auth-pill {
+    padding: 3px 10px;
+    border-radius: 14px;
+    background: rgba(147,233,190,.14);
+    border: 1px solid rgba(147,233,190,.35);
+    color: #93E9BE;
+    font-size: .68rem;
+    font-weight: 600;
+}

@@ -11,6 +11,8 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { createClient } from '@/utils/supabase/client';
 import { MANAGE_ICONS } from '@/lib/manageIcons';
 import { GROUP_ORDER, type BoardConfig, type ColumnDef } from '@/lib/manageTables';
+import ViewAsPanel from '../adminpanel/ViewAsPanel';
+import type { ViewAsState } from '@/lib/getCurrentUser';
 import './manage.css';
 
 const REALTIME_ENABLED = true; // flip off if you'd rather not run a channel per board
@@ -42,7 +44,9 @@ function truncate(str: string, n: number) {
 
 interface ToastMsg { id: number; message: string; type: 'success' | 'error'; show: boolean; }
 
-export default function ManageBoard({ permLevel, groups }: { permLevel: number; groups: Groups }) {
+export default function ManageBoard({
+  permLevel, groups, title, viewingAs,
+}: { permLevel: number; groups: Groups; title?: string; viewingAs?: ViewAsState | null }) {
   const supabase = useMemo(() => createClient(), []);
 
   const allBoards = useMemo(() => {
@@ -129,11 +133,11 @@ export default function ManageBoard({ permLevel, groups }: { permLevel: number; 
     setSearchTerm('');
     setSortState({ col: null, dir: 'default' });
     const boardCfg = allBoards.find(([k]) => k === table)?.[1];
-    if (boardCfg && !boardCfg.comingSoon) loadBoard(table, boardCfg);
+    if (boardCfg && !boardCfg.comingSoon && boardCfg.displayMode !== 'view_as') loadBoard(table, boardCfg);
   };
 
   useEffect(() => {
-    if (currentTable && cfg && !cfg.comingSoon) loadBoard(currentTable, cfg);
+    if (currentTable && cfg && !cfg.comingSoon && cfg.displayMode !== 'view_as') loadBoard(currentTable, cfg);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -332,7 +336,7 @@ export default function ManageBoard({ permLevel, groups }: { permLevel: number; 
         {/* ── Sidebar ── */}
         <aside className="ms-sidebar" ref={sidebarRef}>
           <div className="ms-board-indicator" style={{ transform: `translateY(${indicator.top}px)`, height: indicator.height, opacity: indicator.visible ? 1 : 0 }} />
-          <div className="ms-sidebar-title">Manage {permLevel >= 20 ? 'Everything' : 'Staff'}</div>
+          <div className="ms-sidebar-title">{title ?? `Manage ${permLevel >= 20 ? 'Everything' : 'Staff'}`}</div>
           {GROUP_ORDER.map((groupName) => {
             const boards = groups[groupName] ?? [];
             if (boards.length === 0) return null;
@@ -365,6 +369,8 @@ export default function ManageBoard({ permLevel, groups }: { permLevel: number; 
               <p className="ms-board-sub">
                 {!cfg
                   ? 'Pick something from the sidebar to get started.'
+                  : cfg.displayMode === 'view_as'
+                  ? 'Temporarily browse the site as a different rank or person.'
                   : cfg.comingSoon
                   ? "Not built yet."
                   : loading
@@ -377,7 +383,7 @@ export default function ManageBoard({ permLevel, groups }: { permLevel: number; 
               </p>
             </div>
             <div className="ms-board-header-actions">
-              {cfg && !cfg.comingSoon && (
+              {cfg && !cfg.comingSoon && cfg.displayMode !== 'view_as' && (
                 <input
                   type="text"
                   className="ms-search-input"
@@ -386,7 +392,7 @@ export default function ManageBoard({ permLevel, groups }: { permLevel: number; 
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
               )}
-              {cfg && !cfg.comingSoon && !cfg.readOnly && (
+              {cfg && !cfg.comingSoon && !cfg.readOnly && !cfg.noCreate && cfg.displayMode !== 'view_as' && (
                 <button
                   type="button"
                   className="ms-add-btn"
@@ -399,7 +405,9 @@ export default function ManageBoard({ permLevel, groups }: { permLevel: number; 
           </div>
 
           <div className={`ms-board-content ms-content-${contentPhase === 'visible' ? 'visible' : contentPhase}`}>
-            {!cfg ? null : cfg.comingSoon ? (
+            {!cfg ? null : cfg.displayMode === 'view_as' ? (
+            <ViewAsPanel viewingAs={viewingAs ?? null} />
+            ) : cfg.comingSoon ?  (
               <div className="ms-coming-soon-panel">
                 <FontAwesomeIcon icon={MANAGE_ICONS.hammer} />
                 <div>This board hasn't been built yet — check back soon.</div>
@@ -471,14 +479,16 @@ export default function ManageBoard({ permLevel, groups }: { permLevel: number; 
                               <td key={col}>{formatCellFor(col, def, row)}</td>
                             ))}
                             {!cfg.readOnly && (
-                              <td>
+                                <td>
                                 <div className="ms-row-actions">
                                   <button type="button" className="ms-row-btn" title="Edit" onClick={() => setRecordModal({ open: true, row })}>
                                     <FontAwesomeIcon icon={MANAGE_ICONS.pen} />
                                   </button>
-                                  <button type="button" className="ms-row-btn danger" title="Delete" onClick={() => setConfirmDeleteRow(row)}>
-                                    <FontAwesomeIcon icon={MANAGE_ICONS.trash} />
-                                  </button>
+                                  {!cfg.noDelete && (
+                                    <button type="button" className="ms-row-btn danger" title="Delete" onClick={() => setConfirmDeleteRow(row)}>
+                                      <FontAwesomeIcon icon={MANAGE_ICONS.trash} />
+                                    </button>
+                                  )}
                                 </div>
                               </td>
                             )}

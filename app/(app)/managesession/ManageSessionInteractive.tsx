@@ -8,8 +8,11 @@ import {
   faMagnifyingGlass, faXmark, faClipboard,
 } from '@fortawesome/free-solid-svg-icons';
 import { saveSession, deleteSession } from './actions';
-import { parseTraineePaste, looksLikeSameDate } from './parseTraineePaste';
-import { lookupKnownTrainee, searchKnownTrainees, type KnownTraineeMatch } from './traineeActions';
+import QuickAddTrainee from './QuickAddTrainee';
+import GlobalQuickFillTrainee from './GlobalQuickFillTrainee';
+import { parseTraineePaste, looksLikeSameDate, checkRequiredSessionFields, checkIdentityFields, checkIdentityFieldFormats } from './parseTraineePaste';
+import { lookupKnownTrainee, searchKnownTrainees, validateHostRank, resolveHostByDiscordId, type KnownTraineeMatch } from './traineeActions';
+import { useModalVisibility } from '@/lib/useModalVisibility';
 
 const DRAFT_KEY = 'managesession_draft';
 
@@ -55,22 +58,22 @@ export interface SessionRow {
   num_slots: number;
   session_date: string;
   session_time: string;
+  trainee_timer: number;
   trainer_assignment_mode: string;
   additional_notes: string | null;
   staffRows: StaffChildRow[];
   traineeRows: TraineeChildRow[];
-  trainee_timer: number | null;
 }
 
 // Reads a primary role's assigned name from the session_staff rows, e.g.
 // findPrimaryStaff(rows, 'HOST') matches both 'HOST' and 'HOST, IH'.
-function findPrimaryStaff(staffRows: StaffChildRow[], roleCode: string): string {
+export function findPrimaryStaff(staffRows: StaffChildRow[], roleCode: string): string {
   return staffRows.find((r) => r.role === roleCode || r.role.startsWith(`${roleCode},`))?.staff_name ?? '';
 }
-function hasIH(staffRows: StaffChildRow[], roleCode: string): boolean {
+export function hasIH(staffRows: StaffChildRow[], roleCode: string): boolean {
   return staffRows.find((r) => r.role === roleCode || r.role.startsWith(`${roleCode},`))?.role.includes('IH') ?? false;
 }
-function getHostName(s: SessionRow): string {
+export function getHostName(s: SessionRow): string {
   return findPrimaryStaff(s.staffRows, 'HOST');
 }
 
@@ -94,19 +97,21 @@ function groupByRank(list: StaffOption[]): Record<string, StaffOption[]> {
   return grouped;
 }
 
-function StaffSelect({
-  name, staff, authKey, defaultValue,
+export function StaffSelect({
+  name, staff, authKey, defaultValue, onChange, selectRef,
 }: {
   name: string;
   staff: StaffOption[];
   authKey: 'host_auth' | 'cohost_auth' | 'asst_auth';
   defaultValue?: string | null;
+  onChange?: () => void;
+  selectRef?: React.RefObject<HTMLSelectElement | null>;
 }) {
   const eligible = staff.filter((s) => s[authKey]);
   const grouped = groupByRank(eligible);
 
   return (
-    <select className="staff-select" name={name} defaultValue={defaultValue ?? ''}>
+    <select ref={selectRef} className="staff-select" name={name} defaultValue={defaultValue ?? ''} onChange={onChange}>
       <option value="">— None —</option>
       {RANK_DISPLAY_ORDER.map((rank) =>
         grouped[rank]?.length ? (
@@ -203,6 +208,7 @@ export default function ManageSessionInteractive({
   success?: string;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
+  const { shouldRender, visible } = useModalVisibility(modalOpen);
   const [editing, setEditing] = useState<SessionRow | null>(null);
   const [numSlots, setNumSlots] = useState(4);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
@@ -210,6 +216,7 @@ export default function ManageSessionInteractive({
   const [bookedValue, setBookedValue] = useState(false);
   const [timeDigits, setTimeDigits] = useState(''); // raw digits only, e.g. "1430" — colon is derived, never stored
   const [additionalStaffRows, setAdditionalStaffRows] = useState<{ name: string; role: string }[]>([]);
+  const [hasInternal, setHasInternal] = useState(false);
 
   // Inline quick-fill — one slot's panel open at a time, rendered directly
   // in that slot's own card (no separate modal-on-top-of-modal anymore).
@@ -269,6 +276,7 @@ export default function ManageSessionInteractive({
     setStatusValue('Requested');
     setBookedValue(false);
     setAdditionalStaffRows([]);
+    setHasInternal(false);
 
     const raw = typeof window !== 'undefined' ? localStorage.getItem(DRAFT_KEY) : null;
     if (raw) {
@@ -314,6 +322,7 @@ export default function ManageSessionInteractive({
       .filter((r) => !PRIMARY_ROLE_CODES.some((code) => r.role === code || r.role.startsWith(`${code},`)))
       .map((r) => ({ name: r.staff_name, role: r.role.replace(/^Add T\.\s*/, '') }));
     setAdditionalStaffRows(additional);
+    setHasInternal(hasIH(s.staffRows, 'CH_3') || hasIH(s.staffRows, 'CH_4'));
 
     setModalOpen(true);
   }
@@ -358,29 +367,60 @@ export default function ManageSessionInteractive({
 
     const parsed = parseTraineePaste(pasteText);
 
-    if (!parsed.host || !parsed.dateTime || !parsed.zone) {
-      setPasteError('Missing required field(s) — Host, Date/Time, and Zone must all be present.');
+    const reqCheck = checkRequiredSessionFields(parsed);
+    if (!reqCheck.ok) {
+      setPasteError(`Missing required field(s): ${reqCheck.missing.join(', ')}.`);
+      return;
+    }
+
+    const idCheck = checkIdentityFields(parsed.discordId, parsed.discordUsername, parsed.robloxUsername);
+    if (!idCheck.anyProvided) {
+      setPasteError('Please input any of the fields: Discord ID, Discord Username, Roblox Username.');
+      return;
+    }
+
+    const formatCheck = checkIdentityFieldFormats(parsed.discordId, parsed.discordUsername, parsed.robloxUsername);
+    if (!formatCheck.ok) {
+      setPasteError(formatCheck.errors.join(' '));
       return;
     }
 
     setPasteLoading(true);
+
+    let resolvedHost = parsed.host;
+    if (parsed.hostDiscordId) {
+      const { name, error: idError } = await resolveHostByDiscordId(parsed.hostDiscordId);
+      if (idError || !name) {
+        setPasteLoading(false);
+        setPasteError(idError ?? 'Could not resolve the Host mention.');
+        return;
+      }
+      resolvedHost = name;
+    } else {
+      const rankError = await validateHostRank(parsed.host, parsed.hostPrefix);
+      if (rankError) {
+        setPasteLoading(false);
+        setPasteError(rankError);
+        return;
+      }
+    }
+
     let robloxUsername = parsed.robloxUsername;
     let discordUsername = parsed.discordUsername;
     let discordId = parsed.discordId;
 
     // Only look up / require full identity if something's actually missing —
     // a complete paste never needs to touch known_trainees at all.
-    if (!robloxUsername || !discordUsername || !discordId) {
+    if (!idCheck.ok) {
       const match = await lookupKnownTrainee(discordId, discordUsername);
       if (match) {
         discordId = match.discordId ?? discordId;
         discordUsername = match.discordUsername || discordUsername;
         robloxUsername = match.robloxUsername ?? robloxUsername;
-      } else if (!discordId || !discordUsername || !robloxUsername) {
+      } else {
+        const stillMissing = checkIdentityFields(discordId, discordUsername, robloxUsername).missing;
         setPasteLoading(false);
-        setPasteError(
-          "This trainee isn't in known_trainees yet, so Discord ID, Discord username, and Roblox username are all required in the paste."
-        );
+        setPasteError(`This trainee isn't in known_trainees yet — please also fill in: ${stillMissing.join(', ')}.`);
         return;
       }
     }
@@ -391,8 +431,8 @@ export default function ManageSessionInteractive({
     const currentHost = (form.elements.namedItem('host') as HTMLSelectElement | null)?.value ?? '';
     const currentDate = (form.elements.namedItem('session_date') as HTMLInputElement | null)?.value ?? '';
     const warnings: string[] = [];
-    if (currentHost && parsed.host.toLowerCase() !== currentHost.toLowerCase()) {
-      warnings.push(`Pasted host "${parsed.host}" doesn't match this session's host "${currentHost}".`);
+    if (currentHost && resolvedHost.toLowerCase() !== currentHost.toLowerCase()) {
+      warnings.push(`Pasted host "${resolvedHost}" doesn't match this session's host "${currentHost}".`);
     }
     if (!looksLikeSameDate(parsed.dateTime, currentDate)) {
       warnings.push(`Pasted date "${parsed.dateTime}" doesn't look like it matches this session's date.`);
@@ -498,10 +538,13 @@ export default function ManageSessionInteractive({
           </p>
         </div>
         {permLevel >= 10 && (
-          <button className="btn-primary" onClick={openAdd}>
-            <FontAwesomeIcon icon={isRequestMode ? faEnvelopeOpenText : faPlus} />
-            {isRequestMode ? ' Request Session' : ' Add Session'}
-          </button>
+          <div className="page-header-actions">
+            <GlobalQuickFillTrainee />
+            <button className="btn-primary" onClick={openAdd}>
+              <FontAwesomeIcon icon={isRequestMode ? faEnvelopeOpenText : faPlus} />
+              {isRequestMode ? ' Request Session' : ' Add Session'}
+            </button>
+          </div>
         )}
       </div>
 
@@ -602,6 +645,7 @@ export default function ManageSessionInteractive({
                     {permLevel >= 10 && (
                       <td className="td-actions">
                         <div className="td-actions-inner">
+                          <QuickAddTrainee sessionId={s.session_id} />
                           <button className="action-btn" title="Edit" onClick={() => openEdit(s)}>
                             <FontAwesomeIcon icon={faPen} />
                           </button>
@@ -626,298 +670,311 @@ export default function ManageSessionInteractive({
       </div>
 
       {/* ══ ADD / EDIT MODAL ══ */}
-      {modalOpen && (
+      {shouldRender && (
         <div className="modal-backdrop" onClick={() => setModalOpen(false)}>
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2 className="modal-title">{editing ? 'Edit Session' : isRequestMode ? 'Request Session' : 'Add Session'}</h2>
-              <button className="modal-close-btn" onClick={() => setModalOpen(false)}><FontAwesomeIcon icon={faTimes} /></button>
-            </div>
-
-            <form ref={formRef} action={saveSession} onChange={handleFormChange} className="modal-form">
-              <input type="hidden" name="action" value={editing ? 'edit' : 'add'} />
-              {editing && <input type="hidden" name="session_id" value={editing.session_id} />}
-
-              {!editing && (
-                <div className="form-group">
-                  <label>Custom Session ID <span className="label-hint">(optional — leave blank to auto-assign)</span></label>
-                  <input type="number" name="custom_session_id" min={1} placeholder="Auto-assign" />
-                </div>
-              )}
-
-              <div className="form-row">
-                <div className="form-group flex2">
-                  <label>Session Name*</label>
-                  <input type="text" name="session_name" required defaultValue={editing?.session_name ?? 'PS x YSS SCR Shift : SG Practice'} placeholder="e.g. Training Session #67" />
-                </div>
-                <div className="form-group">
-                  <label>Status*</label>
-                  <select
-                    name="session_status"
-                    value={statusValue}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setStatusValue(v);
-                      if (v === 'Requested') setBookedValue(false); // can't be booked while still just requested
-                    }}
-                  >
-                    <option value="Requested">Requested</option>
-                    <option value="Booked">Booked</option>
-                    <option value="Scheduled">Scheduled</option>
-                    <option value="Cancelled">Cancelled</option>
-                    <option value="Postponed">Postponed</option>
-                  </select>
-                </div>
-                <div className="form-group form-check-group">
-                  <label>Booked?</label>
-                  <label className={`toggle-wrap${statusValue === 'Requested' ? ' toggle-disabled' : ''}`}>
-                    <input
-                      type="checkbox"
-                      name="session_booked"
-                      checked={bookedValue}
-                      disabled={statusValue === 'Requested'}
-                      onChange={(e) => setBookedValue(e.target.checked)}
-                    />
-                    <span className="toggle-track"><span className="toggle-thumb" /></span>
-                  </label>
-                </div>
+          <div className={`modal-box gb-popup-scale${visible ? ' visible-lightbox' : ''}`} onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h2 className="modal-title">{editing ? 'Edit Session' : isRequestMode ? 'Request Session' : 'Add Session'}</h2>
+                <button className="modal-close-btn" onClick={() => setModalOpen(false)}><FontAwesomeIcon icon={faTimes} /></button>
               </div>
 
-              <div className="form-group">
-                <label>Description</label>
-                <textarea name="session_desc" rows={2} defaultValue={editing?.session_desc ?? ''} placeholder="Short session description…" />
-              </div>
+              <form ref={formRef} action={saveSession} onChange={handleFormChange} className="modal-form">
+                <input type="hidden" name="action" value={editing ? 'edit' : 'add'} />
+                {editing && <input type="hidden" name="session_id" value={editing.session_id} />}
 
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Date*</label>
-                  <input type="date" name="session_date" required defaultValue={editing?.session_date ?? ''} />
-                </div>
-                <div className="form-group">
-                  <label>TIME* (BST)</label>
-                  <input
-                    type="text"
-                    name="session_time"
-                    inputMode="numeric"
-                    maxLength={5}
-                    placeholder="HH:MM"
-                    required
-                    value={formatTimeDisplay(timeDigits)}
-                    onChange={handleTimeChange}
-                    onKeyDown={handleTimeKeyDown}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>EXP. DUR* (min)</label>
-                  <input type="number" name="session_duration" min={60} max={180} step={5} placeholder="60" defaultValue={editing?.session_duration ?? ''} />
-                </div>
-                <div className="form-group">
-                  <label>SLOTS*</label>
-                  <input
-                    type="number" name="num_slots" min={4} max={10} placeholder="4"
-                    value={numSlots}
-                    onChange={(e) => setNumSlots(Math.max(4, Math.min(10, parseInt(e.target.value, 10) || 4)))}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>TR. Timer* (min)</label>
-                  <input type="number" name="trainee_timer" min={8} max={20} placeholder="10" defaultValue={editing?.trainee_timer ?? ''} />
-                </div>
-              </div>
-
-              <div className="form-divider"><span>Staff Assignment</span></div>
-
-              <div className="form-row">
-                <div className="form-group flex2">
-                  <label><FontAwesomeIcon icon={faCrown} style={{ color: 'rgba(255,210,80,.7)', fontSize: '.7rem', marginRight: 4 }} /> Host*</label>
-                  <StaffSelect name="host" staff={staff} authKey="host_auth" defaultValue={editing ? findPrimaryStaff(editing.staffRows, 'HOST') : ''} />
-                </div>
-              </div>
-
-              <div className="form-row">
-                {(['co_host1', 'co_host2', 'co_host3', 'co_host4_supervisor'] as const).map((f, i) => {
-                  const code = ['CH_1', 'CH_2', 'CH_3', 'CH_4'][i];
-                  const ihField = i === 2 ? 'co_host3_ih' : i === 3 ? 'co_host4_ih' : null;
-                  return (
-                    <div className="form-group" key={f}>
-                      <label>{i < 3 ? `Co-Host ${i + 1}` : 'Co-Host 4 / SV'}</label>
-                      <StaffSelect name={f} staff={staff} authKey="cohost_auth" defaultValue={editing ? findPrimaryStaff(editing.staffRows, code) : ''} />
-                      {ihField && (
-                        <label className="ih-check">
-                          <input type="checkbox" name={ihField} defaultChecked={editing ? hasIH(editing.staffRows, code) : false} />
-                          Also Internal Helper
-                        </label>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="form-row">
-                {(['assistant_1', 'assistant_2', 'assistant_3', 'assistant_4'] as const).map((f, i) => {
-                  const code = ['AST_1', 'AST_2', 'AST_3', 'AST_4'][i];
-                  return (
-                    <div className="form-group" key={f}>
-                      <label>Assistant {i + 1}</label>
-                      <StaffSelect name={f} staff={staff} authKey="asst_auth" defaultValue={editing ? findPrimaryStaff(editing.staffRows, code) : ''} />
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="form-group">
-                <label>Additional Staff</label>
-                {additionalStaffRows.map((row, i) => (
-                  <div className="additional-staff-row" key={i}>
-                    <input
-                      type="text"
-                      name="additional_staff_name"
-                      placeholder="Name"
-                      value={row.name}
-                      onChange={(e) => {
-                        const next = [...additionalStaffRows];
-                        next[i] = { ...next[i], name: e.target.value };
-                        setAdditionalStaffRows(next);
-                      }}
-                    />
-                    <input
-                      type="text"
-                      name="additional_staff_role"
-                      placeholder="Role (e.g. Observer, IH)"
-                      value={row.role}
-                      onChange={(e) => {
-                        const next = [...additionalStaffRows];
-                        next[i] = { ...next[i], role: e.target.value };
-                        setAdditionalStaffRows(next);
-                      }}
-                    />
-                    <button type="button" className="row-remove-btn" onClick={() => setAdditionalStaffRows(additionalStaffRows.filter((_, j) => j !== i))}>
-                      <FontAwesomeIcon icon={faTimes} />
-                    </button>
+                {!editing && (
+                  <div className="form-group">
+                    <label>Custom Session ID <span className="label-hint">(optional — leave blank to auto-assign)</span></label>
+                    <input type="number" name="custom_session_id" min={1} placeholder="Auto-assign" />
                   </div>
-                ))}
-                <button type="button" className="btn-ghost btn-add-row" onClick={() => setAdditionalStaffRows([...additionalStaffRows, { name: '', role: '' }])}>
-                  <FontAwesomeIcon icon={faPlus} /> Add Staff
-                </button>
-              </div>
+                )}
 
-              <div className="form-divider"><span>Trainee Assignment</span></div>
+                <div className="form-row">
+                  <div className="form-group flex2">
+                    <label>Session Name*</label>
+                    <input type="text" name="session_name" required defaultValue={editing?.session_name ?? 'PS x YSS SCR Shift : SG Practice'} placeholder="e.g. Training Session #67" />
+                  </div>
+                  <div className="form-group">
+                    <label>Status*</label>
+                    <select
+                      name="session_status"
+                      value={statusValue}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setStatusValue(v);
+                        if (v === 'Requested') setBookedValue(false); // can't be booked while still just requested
+                      }}
+                    >
+                      <option value="Requested">Requested</option>
+                      <option value="Booked">Booked</option>
+                      <option value="Scheduled">Scheduled</option>
+                      <option value="Cancelled">Cancelled</option>
+                      <option value="Postponed">Postponed</option>
+                    </select>
+                  </div>
+                  <div className="form-group form-check-group">
+                    <label>Booked?</label>
+                    <label className={`toggle-wrap${statusValue === 'Requested' ? ' toggle-disabled' : ''}`}>
+                      <input
+                        type="checkbox"
+                        name="session_booked"
+                        checked={bookedValue}
+                        disabled={statusValue === 'Requested'}
+                        onChange={(e) => setBookedValue(e.target.checked)}
+                      />
+                      <span className="toggle-track"><span className="toggle-thumb" /></span>
+                    </label>
+                  </div>
+                </div>
 
-              {slotArray.map((n) => {
-                const t = editing?.traineeRows.find((row) => row.slot_number === n);
-                const panelOpen = quickFillSlot === n;
-                return (
-                  <div className="trainee-slot" key={n}>
-                    <div className="trainee-slot-header">
-                      <div className="trainee-slot-label">Trainee {n}</div>
-                      <div className="trainee-slot-header-right">
-                        <label className="standby-check">
-                          <input type="checkbox" name={`trainee_${n}_standby`} defaultChecked={t?.is_standby ?? false} />
-                          Standby / Reserved
-                        </label>
-                        <button
-                          type="button"
-                          className={`btn-paste${panelOpen ? ' active' : ''}`}
-                          onClick={() => (panelOpen ? closeQuickFill() : (setQuickFillSlot(n), setQuickFillMode('search')))}
-                        >
-                          <FontAwesomeIcon icon={faMagnifyingGlass} /> Quick Fill
-                        </button>
-                      </div>
-                    </div>
+                <div className="form-group">
+                  <label>Description</label>
+                  <textarea name="session_desc" rows={2} defaultValue={editing?.session_desc ?? ''} placeholder="Short session description…" />
+                </div>
 
-                    {/* ══ Inline quick-fill panel — search or paste, right in the slot ══ */}
-                    {panelOpen && (
-                      <div className="quick-fill-panel">
-                        <div className="quick-fill-tabs">
-                          <button type="button" className={quickFillMode === 'search' ? 'active' : ''} onClick={() => setQuickFillMode('search')}>
-                            <FontAwesomeIcon icon={faMagnifyingGlass} /> Search
-                          </button>
-                          <button type="button" className={quickFillMode === 'paste' ? 'active' : ''} onClick={() => setQuickFillMode('paste')}>
-                            <FontAwesomeIcon icon={faClipboard} /> Paste
-                          </button>
-                        </div>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Date*</label>
+                    <input type="date" name="session_date" required defaultValue={editing?.session_date ?? ''} />
+                  </div>
+                  <div className="form-group">
+                    <label>TIME* (BST)</label>
+                    <input
+                      type="text"
+                      name="session_time"
+                      inputMode="numeric"
+                      maxLength={5}
+                      placeholder="HH:MM"
+                      required
+                      value={formatTimeDisplay(timeDigits)}
+                      onChange={handleTimeChange}
+                      onKeyDown={handleTimeKeyDown}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>EXP. DUR* (min)</label>
+                    <input type="number" name="session_duration" min={60} max={180} step={5} placeholder="60" defaultValue={editing?.session_duration ?? ''} />
+                  </div>
+                  <div className="form-group">
+                    <label>SLOTS*</label>
+                    <input
+                      type="number" name="num_slots" min={4} max={10} placeholder="4"
+                      value={numSlots}
+                      onChange={(e) => setNumSlots(Math.max(4, Math.min(10, parseInt(e.target.value, 10) || 4)))}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>TR. Timer* (min)</label>
+                    <input type="number" name="trainee_timer" min={8} max={20} placeholder="15" defaultValue={editing?.trainee_timer ?? ''} />
+                  </div>
+                </div>
 
-                        {quickFillMode === 'search' ? (
-                          <>
-                            <input
-                              type="text"
-                              className="quick-fill-search-input"
-                              placeholder="Search known trainees by Discord or Roblox name…"
-                              value={searchQuery}
-                              onChange={(e) => setSearchQuery(e.target.value)}
-                              autoFocus
-                            />
-                            {searchLoading && <div className="quick-fill-hint">Searching…</div>}
-                            {!searchLoading && searchQuery.trim().length >= 2 && searchResults.length === 0 && (
-                              <div className="quick-fill-hint">No matches in known_trainees — try Paste instead to add them.</div>
-                            )}
-                            {searchResults.length > 0 && (
-                              <div className="quick-fill-results">
-                                {searchResults.map((r) => (
-                                  <button type="button" key={r.discordId ?? r.discordUsername} className="quick-fill-result" onClick={() => handleSearchPick(r)}>
-                                    <span className="qfr-discord">{r.discordUsername}</span>
-                                    {r.robloxUsername && <span className="qfr-roblox">{r.robloxUsername}</span>}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </>
-                        ) : (
-                          <>
-                            <textarea
-                              className="paste-textarea"
-                              rows={7}
-                              placeholder={'[Trainee discord ID]\n[Trainee discord username]\n[Trainee roblox username]\n`Host:` [HOST]\n`Date/Time:` DD/MM/YYYY HH:MM\n`Position:` [Position]\n`Zone:` [Zone]\n`Trainee Notes:` [optional]'}
-                              value={pasteText}
-                              onChange={(e) => setPasteText(e.target.value)}
-                            />
-                            {pasteError && <div className="alert alert-error">{pasteError}</div>}
-                            {pasteWarning && <div className="alert paste-warning">{pasteWarning}</div>}
-                            <button type="button" className="btn-primary quick-fill-paste-btn" disabled={pasteLoading} onClick={handlePasteFill}>
-                              {pasteLoading ? 'Checking…' : 'Fill Trainee'}
-                            </button>
-                          </>
+                <div className="form-divider"><span>Staff Assignment</span></div>
+
+                <label className="internal-toggle">
+                  <input type="checkbox" checked={hasInternal} onChange={(e) => setHasInternal(e.target.checked)} />
+                  Session has internal?
+                </label>
+
+                <div className="form-row">
+                  <div className="form-group flex2">
+                    <label><FontAwesomeIcon icon={faCrown} style={{ color: 'rgba(255,210,80,.7)', fontSize: '.7rem', marginRight: 4 }} /> Host*</label>
+                    <StaffSelect name="host" staff={staff} authKey="host_auth" defaultValue={editing ? findPrimaryStaff(editing.staffRows, 'HOST') : ''} />
+                  </div>
+                </div>
+
+                <div className="form-row">
+                  {(['co_host1', 'co_host2', 'co_host3', 'co_host4_supervisor'] as const).map((f, i) => {
+                    const code = ['CH_1', 'CH_2', 'CH_3', 'CH_4'][i];
+                    const ihField = i === 2 ? 'co_host3_ih' : i === 3 ? 'co_host4_ih' : null;
+                    return (
+                      <div className="form-group" key={f}>
+                        <label>{i < 3 ? `Co-Host ${i + 1}` : 'Co-Host 4 / SV'}</label>
+                        <StaffSelect name={f} staff={staff} authKey="cohost_auth" defaultValue={editing ? findPrimaryStaff(editing.staffRows, code) : ''} />
+                        {ihField && hasInternal && (
+                          <label className="ih-check">
+                            <input type="checkbox" name={ihField} defaultChecked={editing ? hasIH(editing.staffRows, code) : false} />
+                            Also Internal Helper
+                          </label>
                         )}
                       </div>
-                    )}
+                    );
+                  })}
+                </div>
 
-                    <div className="form-row">
-                      <div className="form-group flex2">
-                        <label>Roblox Username</label>
-                        <input type="text" name={`trainee_${n}_roblox`} defaultValue={t?.trainee_roblox_username ?? ''} />
+                {hasInternal && (
+                  <p className="internal-hint">
+                    You can also add an Internal Helper who isn&apos;t otherwise assigned — type their name and role as
+                    <strong> &quot;IH&quot;</strong> (or e.g. &quot;IH, Observer&quot;) in Additional Staff below.
+                  </p>
+                )}
+
+                <div className="form-row">
+                  {(['assistant_1', 'assistant_2', 'assistant_3', 'assistant_4'] as const).map((f, i) => {
+                    const code = ['AST_1', 'AST_2', 'AST_3', 'AST_4'][i];
+                    return (
+                      <div className="form-group" key={f}>
+                        <label>Assistant {i + 1}</label>
+                        <StaffSelect name={f} staff={staff} authKey="asst_auth" defaultValue={editing ? findPrimaryStaff(editing.staffRows, code) : ''} />
                       </div>
-                      <div className="form-group flex2">
-                        <label>Discord Username</label>
-                        <input type="text" name={`trainee_${n}_discord`} defaultValue={t?.trainee_discord ?? ''} />
+                    );
+                  })}
+                </div>
+
+                <div className="form-group">
+                  <label>Additional Staff</label>
+                  {additionalStaffRows.map((row, i) => (
+                    <div className="additional-staff-row" key={i}>
+                      <input
+                        type="text"
+                        name="additional_staff_name"
+                        placeholder="Name"
+                        value={row.name}
+                        onChange={(e) => {
+                          const next = [...additionalStaffRows];
+                          next[i] = { ...next[i], name: e.target.value };
+                          setAdditionalStaffRows(next);
+                        }}
+                      />
+                      <input
+                        type="text"
+                        name="additional_staff_role"
+                        placeholder="Role (e.g. Observer, IH)"
+                        value={row.role}
+                        onChange={(e) => {
+                          const next = [...additionalStaffRows];
+                          next[i] = { ...next[i], role: e.target.value };
+                          setAdditionalStaffRows(next);
+                        }}
+                      />
+                      <button type="button" className="row-remove-btn" onClick={() => setAdditionalStaffRows(additionalStaffRows.filter((_, j) => j !== i))}>
+                        <FontAwesomeIcon icon={faTimes} />
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button" className="btn-ghost btn-add-row" onClick={() => setAdditionalStaffRows([...additionalStaffRows, { name: '', role: '' }])}>
+                    <FontAwesomeIcon icon={faPlus} /> Add Staff
+                  </button>
+                </div>
+
+                <div className="form-divider"><span>Trainee Assignment</span></div>
+
+                {slotArray.map((n) => {
+                  const t = editing?.traineeRows.find((row) => row.slot_number === n);
+                  const panelOpen = quickFillSlot === n;
+                  return (
+                    <div className="trainee-slot" key={n}>
+                      <div className="trainee-slot-header">
+                        <div className="trainee-slot-label">Trainee {n}</div>
+                        <div className="trainee-slot-header-right">
+                          <label className="standby-check">
+                            <input type="checkbox" name={`trainee_${n}_standby`} defaultChecked={t?.is_standby ?? false} />
+                            Standby / Reserved
+                          </label>
+                          <button
+                            type="button"
+                            className={`btn-paste${panelOpen ? ' active' : ''}`}
+                            onClick={() => (panelOpen ? closeQuickFill() : (setQuickFillSlot(n), setQuickFillMode('search')))}
+                          >
+                            <FontAwesomeIcon icon={faMagnifyingGlass} /> Quick Fill
+                          </button>
+                        </div>
                       </div>
-                      <div className="form-group">
-                        <label>Discord ID</label>
-                        <input type="text" name={`trainee_${n}_discord_id`} defaultValue={t?.trainee_discord_id ?? ''} />
+
+                      {/* ══ Inline quick-fill panel — search or paste, right in the slot ══ */}
+                      {panelOpen && (
+                        <div className="quick-fill-panel">
+                          <div className="quick-fill-tabs">
+                            <button type="button" className={quickFillMode === 'search' ? 'active' : ''} onClick={() => setQuickFillMode('search')}>
+                              <FontAwesomeIcon icon={faMagnifyingGlass} /> Search
+                            </button>
+                            <button type="button" className={quickFillMode === 'paste' ? 'active' : ''} onClick={() => setQuickFillMode('paste')}>
+                              <FontAwesomeIcon icon={faClipboard} /> Paste
+                            </button>
+                          </div>
+
+                          {quickFillMode === 'search' ? (
+                            <>
+                              <input
+                                type="text"
+                                className="quick-fill-search-input"
+                                placeholder="Search known trainees by Discord or Roblox name…"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                autoFocus
+                              />
+                              {searchLoading && <div className="quick-fill-hint">Searching…</div>}
+                              {!searchLoading && searchQuery.trim().length >= 2 && searchResults.length === 0 && (
+                                <div className="quick-fill-hint">No matches in known_trainees — try Paste instead to add them.</div>
+                              )}
+                              {searchResults.length > 0 && (
+                                <div className="quick-fill-results">
+                                  {searchResults.map((r) => (
+                                    <button type="button" key={r.discordId ?? r.discordUsername} className="quick-fill-result" onClick={() => handleSearchPick(r)}>
+                                      <span className="qfr-discord">{r.discordUsername}</span>
+                                      {r.robloxUsername && <span className="qfr-roblox">{r.robloxUsername}</span>}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <textarea
+                                className="paste-textarea"
+                                rows={7}
+                                placeholder={'[Trainee discord ID]\n[Trainee discord username]\n[Trainee roblox username]\n`Host:` [HOST]\n`Date/Time:` DD/MM/YYYY HH:MM\n`Position:` [Position]\n`Zone:` [Zone]\n`Trainee Notes:` [optional]'}
+                                value={pasteText}
+                                onChange={(e) => setPasteText(e.target.value)}
+                              />
+                              {pasteError && <div className="alert alert-error">{pasteError}</div>}
+                              {pasteWarning && <div className="alert paste-warning">{pasteWarning}</div>}
+                              <button type="button" className="btn-primary quick-fill-paste-btn" disabled={pasteLoading} onClick={handlePasteFill}>
+                                {pasteLoading ? 'Checking…' : 'Fill Trainee'}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="form-row">
+                        <div className="form-group flex2">
+                          <label>Roblox Username</label>
+                          <input type="text" name={`trainee_${n}_roblox`} defaultValue={t?.trainee_roblox_username ?? ''} />
+                        </div>
+                        <div className="form-group flex2">
+                          <label>Discord Username</label>
+                          <input type="text" name={`trainee_${n}_discord`} defaultValue={t?.trainee_discord ?? ''} />
+                        </div>
+                        <div className="form-group">
+                          <label>Discord ID</label>
+                          <input type="text" name={`trainee_${n}_discord_id`} defaultValue={t?.trainee_discord_id ?? ''} />
+                        </div>
+                        <div className="form-group">
+                          <label>Zone</label>
+                          <input type="number" name={`trainee_${n}_zone`} defaultValue={t?.zone ?? ''} />
+                        </div>
                       </div>
-                      <div className="form-group">
-                        <label>Zone</label>
-                        <input type="number" name={`trainee_${n}_zone`} defaultValue={t?.zone ?? ''} />
+                      <div className="form-row">
+                        <div className="form-group flex2">
+                          <label>Trainer</label>
+                          <input type="text" name={`trainee_${n}_trainer`} defaultValue={t?.trainer_name ?? ''} />
+                        </div>
+                        <div className="form-group flex2">
+                          <label>Note</label>
+                          <input type="text" name={`trainee_${n}_note`} defaultValue={t?.note ?? ''} />
+                        </div>
                       </div>
                     </div>
-                    <div className="form-row">
-                      <div className="form-group flex2">
-                        <label>Trainer</label>
-                        <input type="text" name={`trainee_${n}_trainer`} defaultValue={t?.trainer_name ?? ''} />
-                      </div>
-                      <div className="form-group flex2">
-                        <label>Note</label>
-                        <input type="text" name={`trainee_${n}_note`} defaultValue={t?.note ?? ''} />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
 
-              <div className="modal-footer">
-                <button type="button" className="btn-ghost" onClick={() => setModalOpen(false)}>Cancel</button>
-                <button type="submit" className="btn-primary">{editing ? 'Save Changes' : isRequestMode ? 'Submit Request' : 'Add Session'}</button>
-              </div>
-            </form>
+                <div className="modal-footer">
+                  <button type="button" className="btn-ghost" onClick={() => setModalOpen(false)}>Cancel</button>
+                  <button type="submit" className="btn-primary">{editing ? 'Save Changes' : isRequestMode ? 'Submit Request' : 'Add Session'}</button>
+                </div>
+              </form>
+            
           </div>
         </div>
       )}

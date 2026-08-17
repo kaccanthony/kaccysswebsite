@@ -30,8 +30,8 @@ export default async function DashboardPage() {
   }
 
   const cards = getVisibleCards({
-    rawRole: user.rawRole,
-    isAdmin: user.isAdmin,
+    rawRole: user.effectiveRole,
+    isAdmin: user.effectiveIsAdmin,
     myLiveSessionId,
   });
 

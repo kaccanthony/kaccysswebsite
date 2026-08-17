@@ -1,0 +1,108 @@
+/* sessionongoing.module.css
+   Ported from the original sessionongoing.css. Class names are camelCased to
+   match the `styles.xxx` references in SessionOngoingClient.tsx (CSS Modules
+   don't require this, but it keeps the TSX <-> CSS mapping obvious). Colors,
+   spacing, and component look are carried over 1:1 — nothing visual changed. */
+
+.wrap { min-height: 100vh; font-family: 'Inter', sans-serif; background: #080808; color: #fff; }
+
+.topbar { position: fixed; top: 0; left: 0; right: 0; z-index: 100; height: 64px; display: flex; align-items: center; gap: 14px; padding: 0 28px; background: rgba(20,20,20,.85); border-bottom: 1px solid rgba(255,255,255,.10); }
+.appName { font-family: 'Libre Baskerville', serif; font-size: 1rem; font-weight: 600; color: rgba(255,255,255,.9); flex: 1; }
+.livePill { display: flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 20px; background: rgba(74,222,128,.10); border: 1px solid rgba(74,222,128,.30); font-size: .72rem; color: #4ade80; font-weight: 600; }
+.liveDot { width: 6px; height: 6px; border-radius: 50%; background: #4ade80; }
+.syncNote { font-size: .68rem; color: rgba(255,255,255,.32); margin-left: 2px; }
+.profileMeta { display: flex; align-items: center; gap: 8px; }
+.avatar { border-radius: 50%; object-fit: cover; }
+.profileRole { font-size: .70rem; color: rgba(255,255,255,.45); }
+
+main { position: relative; z-index: 1; padding: 90px 28px 60px; max-width: 1600px; margin: 0 auto; }
+
+.sessionHead { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 18px; flex-wrap: wrap; }
+.sessionTitle { font-family: 'Libre Baskerville', serif; font-size: 1.5rem; font-weight: 600; }
+.sessionSub { font-size: .78rem; color: rgba(255,255,255,.55); margin-top: 4px; }
+
+.panel { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.10); border-radius: 16px; margin-bottom: 20px; overflow: hidden; }
+.panelTitle { padding: 12px 20px; font-size: .72rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: rgba(255,255,255,.55); background: rgba(255,255,255,.04); border-bottom: 1px solid rgba(255,255,255,.10); display: flex; align-items: center; gap: 10px; }
+
+.overrideColumns { display: grid; grid-template-columns: repeat(3, 1fr); }
+.overrideCol { display: flex; flex-direction: column; gap: 8px; padding: 14px 20px; border-right: 1px solid rgba(255,255,255,.10); }
+.overrideCol:last-child { border-right: none; }
+.ovrBtn { display: flex; align-items: center; gap: 7px; padding: 8px 13px; border-radius: 10px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.05); color: rgba(255,255,255,.68); font-size: .75rem; cursor: pointer; width: 100%; text-align: left; }
+.ovrBtn.on { background: rgba(255,107,107,.12); border-color: rgba(255,107,107,.4); color: #ffb3b3; }
+.ovrBtn.dangerous { border-color: rgba(255,107,107,.35); }
+.ovrBtn.dangerous.on { background: rgba(255,107,107,.22); border-color: #ff6b6b; color: #fff; }
+.hostOnly { }
+
+.lockTagLocked, .lockTagUnlocked { font-size: .62rem; padding: 3px 9px; border-radius: 20px; display: flex; align-items: center; gap: 5px; margin-left: auto; }
+.lockTagLocked { color: rgba(255,255,255,.32); background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.10); }
+.lockTagUnlocked { color: #4ade80; background: rgba(74,222,128,.1); border: 1px solid rgba(74,222,128,.3); }
+
+.infoGrid { display: grid; grid-template-columns: repeat(4, 1fr); }
+.infoCell { padding: 14px 20px; border-right: 1px solid rgba(255,255,255,.10); border-bottom: 1px solid rgba(255,255,255,.10); }
+.infoLabel { font-size: .66rem; text-transform: uppercase; letter-spacing: .08em; color: rgba(255,255,255,.32); margin-bottom: 6px; }
+.cellInput { width: 100%; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.18); border-radius: 8px; color: #fff; padding: 7px 10px; font-size: .82rem; font-family: inherit; }
+.cellInput:disabled { opacity: .5; cursor: not-allowed; }
+.globalTimerValue { font-family: 'JetBrains Mono', monospace; font-size: 1.4rem; font-weight: 600; color: #7cc4ff; }
+
+.timeTrackerGrid { display: flex; flex-direction: column; gap: 14px; padding: 16px 20px; }
+.timeTrackerRow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.pipLabel { min-width: 190px; color: rgba(255,255,255,.65); font-size: .85rem; }
+.timeTrackerValue { font-family: 'JetBrains Mono', monospace; font-size: .9rem; font-weight: 600; padding: 4px 12px; border-radius: 20px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.18); color: rgba(255,255,255,.55); }
+.miniOverrideBtn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid rgba(255,255,255,.18); background: rgba(124,196,255,.1); color: #7cc4ff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+
+.tableWrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .80rem; min-width: 1200px; }
+thead th { position: sticky; top: 0; background: #141414; color: rgba(255,255,255,.55); font-size: .65rem; text-transform: uppercase; padding: 10px; border-bottom: 1px solid rgba(255,255,255,.18); border-right: 1px solid rgba(255,255,255,.10); white-space: nowrap; }
+tbody td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.10); border-right: 1px solid rgba(255,255,255,.10); color: rgba(255,255,255,.85); }
+
+.timerCell { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.timerDisplay { font-family: 'JetBrains Mono', monospace; font-size: .82rem; min-width: 42px; color: rgba(255,255,255,.55); }
+.timerDisplay.running { color: #4ade80; }
+.timerDisplay.low { color: #f5a524; }
+.timerBtn { width: 24px; height: 24px; border-radius: 7px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.05); color: rgba(255,255,255,.7); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: .65rem; }
+
+.chk { width: 22px; height: 22px; border-radius: 6px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.05); cursor: pointer; }
+
+.feedbackBtn { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.18); background: rgba(124,196,255,.08); color: #7cc4ff; font-size: .72rem; cursor: pointer; white-space: nowrap; }
+.announcementCell { display: flex; gap: 6px; }
+.announcementCopyBtn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 8px; border: 1px solid rgba(255,255,255,.18); background: rgba(124,196,255,.08); color: #7cc4ff; cursor: pointer; }
+
+.completeBtn { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.05); color: rgba(255,255,255,.55); font-size: .72rem; cursor: pointer; white-space: nowrap; }
+.completeBtn.done { background: rgba(74,222,128,.14); border-color: rgba(74,222,128,.4); color: #4ade80; }
+.rowDelBtn { width: 26px; height: 26px; border-radius: 7px; border: 1px solid rgba(255,107,107,.35); background: rgba(255,107,107,.08); color: #ff8080; display: flex; align-items: center; justify-content: center; cursor: pointer; margin: 0 auto; }
+
+.addRowBar { padding: 10px 20px; display: flex; gap: 10px; border-top: 1px solid rgba(255,255,255,.10); }
+.addBtn { display: flex; align-items: center; gap: 7px; padding: 8px 14px; border-radius: 9px; border: 1px dashed rgba(255,255,255,.18); background: transparent; color: rgba(255,255,255,.55); font-size: .78rem; cursor: pointer; }
+.addBtn:disabled { opacity: .35; cursor: not-allowed; }
+
+.twoCol { display: grid; grid-template-columns: 1fr 1.4fr; gap: 20px; }
+.driversTable, .staffTable { width: 100%; border-collapse: collapse; font-size: .80rem; }
+
+.stationGenRow { display: flex; align-items: center; gap: 8px; max-width: 420px; margin: 16px auto; padding-bottom: 16px; }
+
+.concludePanelBody { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.concludeDesc { font-size: .78rem; color: rgba(255,255,255,.55); max-width: 520px; }
+.mbtn, .mbtnPrimary, .mbtnDanger { padding: 9px 18px; border-radius: 9px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.06); color: #fff; font-size: .82rem; cursor: pointer; }
+.mbtnPrimary { background: #7cc4ff; border-color: #7cc4ff; color: #08121c; font-weight: 600; }
+.mbtnDanger { background: #ff6b6b; border-color: #ff6b6b; color: #1a0a0a; font-weight: 700; }
+.mbtnDanger:disabled { opacity: .4; cursor: not-allowed; }
+
+.bellWidget { position: fixed; left: 20px; top: calc(100vh - 96px); z-index: 600; }
+.bellFab { width: 56px; height: 56px; border-radius: 50%; border: 1px solid rgba(255,255,255,.18); background: #7cc4ff; color: #08121c; font-size: 1.3rem; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 12px 30px rgba(0,0,0,.5); }
+
+.toastContainer { position: fixed; bottom: 20px; right: 20px; z-index: 500; display: flex; flex-direction: column-reverse; gap: 10px; }
+.toast { width: 300px; background: rgba(18,18,20,.96); border: 1px solid rgba(255,107,107,.4); border-radius: 12px; padding: 12px 14px; box-shadow: 0 16px 40px rgba(0,0,0,.55); opacity: 0; transition: opacity .2s; }
+.toast.show { opacity: 1; }
+.toastMsg { display: flex; gap: 8px; font-size: .8rem; color: #ffdede; }
+
+.modalOverlay { position: fixed; top: 64px; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.78); z-index: 300; align-items: center; justify-content: center; padding: 24px; }
+.modal { width: 96vw; max-width: 1000px; max-height: 88vh; overflow-y: auto; background: #121214; border: 1px solid rgba(255,255,255,.18); border-radius: 18px; box-shadow: 0 24px 70px rgba(0,0,0,.7); }
+.modalHead { position: sticky; top: 0; background: linear-gradient(135deg, #2a6fd6, #4a9eff); padding: 18px 22px; text-align: center; }
+.modalBody { padding: 20px 22px 24px; }
+.modalFooter { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.modalClose { position: absolute; top: 14px; right: 16px; background: rgba(255,255,255,.15); border: none; width: 28px; height: 28px; border-radius: 50%; color: #fff; cursor: pointer; }
+.confirmMessage { font-size: .85rem; color: rgba(255,255,255,.85); line-height: 1.55; white-space: pre-wrap; }
+
+.feedbackRow { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,.10); }
+.feedbackLabel { font-size: .68rem; text-transform: uppercase; letter-spacing: .07em; color: rgba(255,255,255,.32); text-transform: capitalize; }
+.feedbackText { width: 100%; min-height: 70px; padding: 10px 12px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.18); border-radius: 10px; color: #fff; font: inherit; font-size: .78rem; }

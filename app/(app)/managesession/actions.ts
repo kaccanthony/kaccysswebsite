@@ -68,13 +68,7 @@ export async function deleteSession(formData: FormData) {
 
 // ── Primary staff roles, per your new convention: HOST / CH_1-4 / AST_1-4.
 // CH_3 and CH_4 each get an optional ", IH" suffix from their checkbox. ──
-type PrimaryRoleDefinition = {
-  role: string;
-  field: string;
-  ihField?: string;
-};
-
-const PRIMARY_ROLES: PrimaryRoleDefinition[] = [
+const PRIMARY_ROLES = [
   { role: 'HOST', field: 'host' },
   { role: 'CH_1', field: 'co_host1' },
   { role: 'CH_2', field: 'co_host2' },
@@ -84,7 +78,7 @@ const PRIMARY_ROLES: PrimaryRoleDefinition[] = [
   { role: 'AST_2', field: 'assistant_2' },
   { role: 'AST_3', field: 'assistant_3' },
   { role: 'AST_4', field: 'assistant_4' },
-];
+] as const;
 
 export async function saveSession(formData: FormData) {
   const user = await getCurrentUser();
@@ -141,11 +135,11 @@ export async function saveSession(formData: FormData) {
     session_desc: (formData.get('session_desc') as string) || null,
     session_duration: (formData.get('session_duration') as string) || '',
     num_slots: numSlots,
+    trainee_timer: parseInt((formData.get('trainee_timer') as string) || '15', 10),
     trainer_assignment_mode: (formData.get('trainer_assignment_mode') as string) || 'auto',
     session_date: sessionDate,
     session_time: sessionTime,
     additional_notes: (formData.get('additional_notes') as string) || null,
-    trainee_timer: parseInt((formData.get('trainee_timer') as string) || '10', 10)
   };
 
   let sessionId: number;

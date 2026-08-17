@@ -48,11 +48,19 @@ export function getRoleLabel({ rawRole, isStaff, isAdmin, isGuildMember = true }
   if (isAdmin) return 'Developer';
   return isGuildMember ? 'Non Shift Helper' : 'Non Member';
 }
+
+// Used where only rawRole + permLevel are available (no isStaff/isAdmin booleans handy) —
+// e.g. the live session panel, which reads user.effectiveRole/effectivePermLevel directly.
+export function formatRoleDisplay(rawRole: string, permLevel: number): string {
+  if (rawRole) return rawRole; // e.g. "Head Staff"
+  if (permLevel >= 20) return 'Developer';
+  return 'Non Shift Helper';
+}
  
 // ── Bento card catalog ──────────────────────────────────────────────
 export type CardKey =
-  | 'booking' | 'setup' | 'my_session' | 'active' | 'upcoming'
-  | 'past' | 'staff' | 'manage_staff' | 'admin_panel';
+  | 'booking' | 'setup' | 'feedback' | 'my_session' | 'manage_events' | 'active' | 'upcoming'
+  | 'past' | 'events' | 'staff' | 'manage_staff' | 'admin_panel';
  
 export interface BentoCard {
   key: CardKey;
@@ -66,25 +74,28 @@ export interface BentoCard {
 export function getAllCards(myLiveSessionId: number | null): Record<CardKey, BentoCard> {
   return {
     booking:      { key: 'booking', label: 'Manage Session(s)', sub: 'Manager & Head Staff', icon: '/images/icons/OM.png', href: '/managesession' },
-    setup:        { key: 'setup', label: 'Session Setup', sub: 'Head-Staff', icon: '/images/icons/HS.png', href: '/setupsesh', wip: true },
+    setup:        { key: 'setup', label: 'Session Setup', sub: 'Head-Staff', icon: '/images/icons/HS.png', href: '/setupsesh'},
+    feedback:     { key: 'feedback', label: 'Feedback', sub: 'Co-Host Authorized+', icon: '/images/icons/ST.png', href: '/feedback', wip: true },
     my_session:   { key: 'my_session', label: 'Session Panel', sub: 'All Staff (depending on your role)', icon: '/images/icons/ST.png', href: `/sessionongoing?session_id=${myLiveSessionId ?? ''}`, wip: true },
+    manage_events: { key: 'manage_events', label: 'Manage Events', sub: 'Event Authorized+', icon: '/images/icons/ST.png', href: '/manageevents', wip: true },
+    events:       { key: 'events', label: 'Events', sub: '', icon: 'book', href: '/events', wip: true },
     active:       { key: 'active', label: 'Active Session', sub: '', icon: 'clock', href: '/active'},
-    upcoming:     { key: 'upcoming', label: 'Upcoming Sessions', sub: '', icon: 'clock', href: '/upcomingsesh', wip: true },
-    past:         { key: 'past', label: 'Past Sessions', sub: '', icon: 'backwardFast', href: '/past', wip: true },
+    upcoming:     { key: 'upcoming', label: 'Upcoming Sessions', sub: '', icon: 'clock', href: '/upcomingsesh'},
+    past:         { key: 'past', label: 'Past Sessions', sub: '', icon: 'backwardFast', href: '/past'},
     staff:        { key: 'staff', label: 'Staff Overview', sub: '', icon: 'users', href: '/staff', wip: true },
-    manage_staff: { key: 'manage_staff', label: 'Manage Staff', sub: 'Manager & Admin', icon: '/images/icons/OM.png', href: '/manager/managestaff', wip: true },
-    admin_panel:  { key: 'admin_panel', label: 'Admin Panel', sub: 'Admin only', icon: 'userTie', href: '/admin', wip: true },
+    manage_staff: { key: 'manage_staff', label: 'Manage Staff', sub: 'Manager & Admin', icon: '/images/icons/OM.png', href: '/manage'},
+    admin_panel:  { key: 'admin_panel', label: 'Admin Panel', sub: 'Admin only', icon: 'userTie', href: '/adminpanel'},
   };
 }
  
 // Rank -> allowed cards, for NON-admin accounts. Admins bypass this
 // entirely in getVisibleCards() below and see every card that exists.
 export const ROLE_CARDS: Record<string, CardKey[]> = {
-  'Operations Manager': ['booking', 'setup', 'my_session', 'active', 'upcoming', 'past', 'staff', 'manage_staff'],
-  'Community Manager': ['booking', 'setup', 'my_session', 'active', 'upcoming', 'past', 'staff', 'manage_staff'],
-  'Head Staff': ['booking', 'setup', 'my_session', 'active', 'upcoming', 'past', 'staff'],
-  'Host Authorized': ['booking', 'setup', 'my_session', 'active', 'upcoming', 'past', 'staff'],
-  'Co-Host Authorized': ['my_session', 'active', 'upcoming', 'past', 'staff'],
+  'Operations Manager': ['booking', 'setup', 'my_session', 'active', 'upcoming', 'past', 'staff', 'feedback', 'manage_staff'],
+  'Community Manager': ['booking', 'setup', 'my_session', 'active', 'upcoming', 'past', 'staff', 'feedback', 'manage_staff'],
+  'Head Staff': ['booking', 'setup', 'my_session', 'active', 'upcoming', 'past', 'feedback', 'staff'],
+  'Host Authorized': ['booking', 'setup', 'my_session', 'active', 'upcoming', 'past', 'feedback', 'staff'],
+  'Co-Host Authorized': ['my_session', 'active', 'upcoming', 'past', 'feedback', 'staff'],
   'Assistant Authorized': ['my_session', 'active', 'upcoming', 'past', 'staff'],
   'Event Authorized': ['my_session', 'active', 'upcoming', 'past', 'staff'],
   '': ['active', 'upcoming', 'past'], // NSH / regular community members
@@ -134,18 +145,18 @@ export function getRoleColor(rawRole: string, isAdmin: boolean, adminRole?: stri
   if (isAdmin) {
     switch (adminRole) {
       case 'owner':
-        return 'linear-gradient(90deg, #f38181, #ea86c6, #b09ff7, #51b8fc, #00c5d3, #5bc899, #a6c06f, #e1b172);';
+        return 'linear-gradient(90deg, #f38181, #ea86c6, #b09ff7, #51b8fc, #00c5d3, #5bc899, #a6c06f, #e1b172)';
       case 'developer':
-        return 'linear-gradient(90deg, #da97ff, #da97ff, #da97ff, #da97ff, #c2a4ff, #8abaff, #48ccff, #00d9ff);';
+        return 'linear-gradient(90deg, #da97ff, #da97ff, #da97ff, #da97ff, #c2a4ff, #8abaff, #48ccff, #00d9ff)';
       case 'moderator':
-        return 'linear-gradient(165deg, #ffc7c7, #e3aabb, #c590ae, #a6779f, #86608e, #654b7b, #433768, #1a2656);';
+        return 'linear-gradient(165deg, #ffc7c7, #e3aabb, #c590ae, #a6779f, #86608e, #654b7b, #433768, #1a2656)';
       default:
         return 'linear-gradient(135deg, #ff5c7a, #d6294a)';
     }
   }
-  if (_OM_RANKS.includes(rawRole)) return 'linear-gradient(90deg, #c631eb, #c743ed, #c852ef, #c95ff1, #cb6bf3, #cc76f4, #cd80f5, #cf8af6);';
-  if (_CM_RANKS.includes(rawRole)) return 'linear-gradient(90deg, #c631eb, #c743ed, #c852ef, #c95ff1, #cb6bf3, #cc76f4, #cd80f5, #cf8af6);';
-  if (_HS_RANKS.includes(rawRole)) return 'linear-gradient(90deg, #08ffe9, #00f8f6, #13f1ff, #39e9ff, #55e0ff, #6ed7ff, #83ceff, #94c5ff);';
-  if (_ST_RANKS.includes(rawRole)) return 'linear-gradient(90deg, #3533cd, #313cd5, #2d45dc, #284ee4, #2256eb, #1b5ef2, #1066f8, #006eff);';
-  return 'linear-gradient(90deg, #2f2f2f, #373737, #3f3f3f, #484848, #505050, #595959, #626262, #6b6b6b);';
+  if (_OM_RANKS.includes(rawRole)) return 'linear-gradient(90deg, #c631eb, #c743ed, #c852ef, #c95ff1, #cb6bf3, #cc76f4, #cd80f5, #cf8af6)';
+  if (_CM_RANKS.includes(rawRole)) return 'linear-gradient(90deg, #c631eb, #c743ed, #c852ef, #c95ff1, #cb6bf3, #cc76f4, #cd80f5, #cf8af6)';
+  if (_HS_RANKS.includes(rawRole)) return 'linear-gradient(90deg, #08ffe9, #00f8f6, #13f1ff, #39e9ff, #55e0ff, #6ed7ff, #83ceff, #94c5ff)';
+  if (_ST_RANKS.includes(rawRole)) return 'linear-gradient(90deg, #3533cd, #313cd5, #2d45dc, #284ee4, #2256eb, #1b5ef2, #1066f8, #006eff)';
+  return 'linear-gradient(90deg, #2f2f2f, #373737, #3f3f3f, #484848, #505050, #595959, #626262, #6b6b6b)';
 }

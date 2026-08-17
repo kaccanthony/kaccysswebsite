@@ -3,6 +3,103 @@
 
 import { getCurrentUser } from '@/lib/getCurrentUser';
 import { createClient } from '@/utils/supabase/server';
+import { RANK_PREFIX_MAP } from './parseTraineePaste';
+
+const UNAVAILABLE_MSG = "Couldn't verify staff records right now — please try again in a moment.";
+
+/**
+ * Checks a parsed Host field's rank prefix (e.g. "OM" from "@[OM] Yoshi5336")
+ * against that person's real staff_rank — checks staff_profiles first (real,
+ * logged-in staff), then staff_roster (pre-registered, not yet claimed).
+ * Returns null when there's nothing to check (no prefix in the paste) or the
+ * prefix matches; otherwise a user-facing error string. Distinguishes an actual
+ * "not found" from a Supabase/network error on the lookup itself — the latter
+ * should never be reported to the user as "this person isn't staff".
+ */
+export async function validateHostRank(hostName: string, prefix: string | null): Promise<string | null> {
+  if (!prefix) return null;
+  if (!hostName) return null; // required-field check already caught a missing host
+
+  await getCurrentUser();
+  const supabase = await createClient();
+
+  let rank: string | null = null;
+
+  const { data: profile, error: profileErr } = await supabase
+    .from('profiles')
+    .select('id')
+    .ilike('discord_username', hostName)
+    .maybeSingle();
+  if (profileErr) return UNAVAILABLE_MSG;
+
+  if (profile) {
+    const { data: staffProfile, error: staffErr } = await supabase
+      .from('staff_profiles')
+      .select('staff_rank')
+      .eq('id', profile.id)
+      .maybeSingle();
+    if (staffErr) return UNAVAILABLE_MSG;
+    rank = staffProfile?.staff_rank ?? null;
+  }
+
+  if (!rank) {
+    const { data: rosterRow, error: rosterErr } = await supabase
+      .from('staff_roster')
+      .select('staff_rank')
+      .ilike('discord_username', hostName)
+      .eq('claimed', false)
+      .maybeSingle();
+    if (rosterErr) return UNAVAILABLE_MSG;
+    rank = rosterRow?.staff_rank ?? null;
+  }
+
+  if (!rank) {
+    return `Couldn't find "${hostName}" on staff to verify the [${prefix}] prefix — check the name is spelled correctly.`;
+  }
+
+  const expectedRanks = RANK_PREFIX_MAP[prefix];
+  if (!expectedRanks.includes(rank)) {
+    return `Rank mismatch — [${prefix}] implies ${expectedRanks.join(' or ')}, but "${hostName}" is ranked ${rank}.`;
+  }
+
+  return null;
+}
+
+export interface HostIdResolution {
+  name: string | null;
+  error: string | null;
+}
+
+/**
+ * Resolves a raw <@discordId> mention (see parseHostField) back to a real
+ * staff display name — checks profiles (real, logged-in) first, then
+ * staff_roster by discord_id (pre-registered, not yet claimed). The ID itself
+ * is authoritative, so unlike validateHostRank there's no separate prefix to
+ * cross-check — this just needs to find *someone* on staff with that ID.
+ */
+export async function resolveHostByDiscordId(discordId: string): Promise<HostIdResolution> {
+  await getCurrentUser();
+  const supabase = await createClient();
+
+  const { data: profile, error: profileErr } = await supabase
+    .from('profiles')
+    .select('discord_username')
+    .eq('discord_id', discordId)
+    .maybeSingle();
+  if (profileErr) return { name: null, error: UNAVAILABLE_MSG };
+  if (profile?.discord_username) return { name: profile.discord_username, error: null };
+
+  const { data: rosterRow, error: rosterErr } = await supabase
+    .from('staff_roster')
+    .select('discord_username')
+    .eq('discord_id', discordId)
+    .eq('claimed', false)
+    .maybeSingle();
+  if (rosterErr) return { name: null, error: UNAVAILABLE_MSG };
+  if (rosterRow?.discord_username) return { name: rosterRow.discord_username, error: null };
+
+  return { name: null, error: `Couldn't find a staff member matching that Discord mention (ID ${discordId}).` };
+}
 
 export interface KnownTraineeMatch {
   discordId: string | null;
@@ -63,5 +160,49 @@ export async function searchKnownTrainees(query: string): Promise<KnownTraineeMa
     discordId: d.discord_id,
     discordUsername: d.discord_username,
     robloxUsername: d.roblox_username,
+  }));
+}
+
+export interface SessionMatch {
+  sessionId: number;
+  sessionName: string | null;
+  host: string;
+  date: string;
+  time: string;
+}
+
+/**
+ * Finds a session by host name + date, for the global Quick Fill flow —
+ * so a paste block (which already carries Host + Date/Time) can locate
+ * the right session automatically, no manual list-searching needed.
+ * Loose on time (host+date can be enough to disambiguate in practice);
+ * returns every match so the caller can ask the user to pick if there's
+ * more than one.
+ */
+export async function findSessionsByHostAndDate(host: string, dateISO: string): Promise<SessionMatch[]> {
+  await getCurrentUser();
+
+  const supabase = await createClient();
+  const { data: staffRows } = await supabase
+    .from('session_staff')
+    .select('session_id')
+    .eq('role', 'HOST')
+    .ilike('staff_name', host);
+
+  const sessionIds = (staffRows ?? []).map((r) => r.session_id);
+  if (sessionIds.length === 0) return [];
+
+  const { data: sessions } = await supabase
+    .from('session_upcoming')
+    .select('session_id, session_name, session_date, session_time')
+    .in('session_id', sessionIds)
+    .eq('session_date', dateISO);
+
+  return (sessions ?? []).map((s) => ({
+    sessionId: s.session_id,
+    sessionName: s.session_name,
+    host,
+    date: s.session_date,
+    time: s.session_time,
   }));
 }

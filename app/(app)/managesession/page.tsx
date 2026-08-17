@@ -36,7 +36,7 @@ export default async function ManageSessionPage({
   searchParams: Promise<{ success?: string; error?: string }>;
 }) {
   const user = await getCurrentUser();
-  if (user.permLevel < 10) redirect('/dashboard');
+  if (user.effectivePermLevel < 10) redirect('/dashboard');
 
   const params = await searchParams;
   const supabase = await createClient();
@@ -139,8 +139,8 @@ export default async function ManageSessionPage({
       <ManageSessionInteractive
         sessions={sessionsWithChildren as SessionRow[]}
         staff={staff}
-        rawRole={user.rawRole}
-        permLevel={user.permLevel}
+        rawRole={user.effectiveRole}
+        permLevel={user.effectivePermLevel}
         success={params.success}
       />
     </>

@@ -11,7 +11,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const user = await getCurrentUser(); // redirects to /login internally if not signed in
   const supabase = await createClient();
 
-  const roleInfo = { rawRole: user.rawRole, isStaff: user.isStaff, isAdmin: user.isAdmin };
+  const roleInfo = { rawRole: user.effectiveRole, isStaff: user.viewingAs ? user.effectivePermLevel > 0 : user.isStaff, isAdmin: user.viewingAs ? false : user.isAdmin };
   const displayName = formatNameWithPrefix(user.username, roleInfo);
   const roleLabel = getRoleLabel(roleInfo);
 
@@ -73,11 +73,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           username: displayName,
           role: roleLabel,
           avatarUrl: user.robloxAvatarUrl ?? user.avatarUrl,
-          rawRole: user.rawRole,
-          isAdmin: user.isAdmin,
+          rawRole: user.effectiveRole,
+          isAdmin: user.viewingAs ? false : user.isAdmin, 
           adminRole: user.adminRole,   // <-- add this line
         }}
         assignedSessions={assignedSessions}
+        viewingAs={user.viewingAs}
       >
       {children}
     </AppShell>

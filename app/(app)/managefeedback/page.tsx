@@ -19,7 +19,7 @@ export default async function ManageFeedbackPage({
   // so this gates on "any signed-in staff member" rather than mirroring
   // managesession's `permLevel >= 10` manager-only gate. Tighten this if
   // feedback-writing should actually be more restricted.
-  if (!user.isStaff) redirect('/dashboard');
+  if (!user.effectiveIsStaff) redirect('/dashboard');
 
   const params = await searchParams;
   const [logs, traineeOptions] = await Promise.all([getFeedbackLogs(), getSessionTraineeOptions()]);

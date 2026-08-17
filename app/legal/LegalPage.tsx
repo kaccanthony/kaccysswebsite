@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import type { LegalDoc } from '@/lib/legal-content';
 import { getCurrentUserOrNull } from '@/lib/getCurrentUserOrNull';
-import { getRoleLabel } from '@/lib/roles';
+import { formatNameWithPrefix, getRoleLabel } from '@/lib/roles';
 import AppShell from '@/app/(app)/AppShell';
 import './legal.css';
 
@@ -58,18 +58,23 @@ export default async function LegalPage({
   );
 
   if (user) {
+    // Same shape as app/(app)/layout.tsx builds — name prefix + Roblox-avatar-first fallback,
+    // so a logged-in visitor sees the exact same header here as everywhere else in the app.
+    const roleInfo = { rawRole: user.rawRole, isStaff: user.isStaff, isAdmin: user.isAdmin };
+
     return (
       <AppShell
         user={{
-          username: user.username,
-          role: getRoleLabel({ rawRole: user.rawRole, isStaff: user.isStaff, isAdmin: user.isAdmin }),
-          avatarUrl: user.avatarUrl,
+          username: formatNameWithPrefix(user.username, roleInfo),
+          role: getRoleLabel(roleInfo),
+          avatarUrl: user.robloxAvatarUrl ?? user.avatarUrl,
           rawRole: user.rawRole,
           isAdmin: user.isAdmin,
           adminRole: user.adminRole,
         }}
-        // Legal pages don't need real assigned-session data — empty is fine, it just shows
-        // the normal "No active sessions" pill in the profile popup.
+        // Not worth re-running layout.tsx's session_upcoming query on a static legal page —
+        // this just shows the normal "No active sessions" pill in the popup, same as any
+        // other page a staff member visits with nothing currently assigned.
         assignedSessions={[]}
       >
         <div className="legal-page legal-page-authed">{content}</div>
@@ -83,7 +88,7 @@ export default async function LegalPage({
       <div className="legal-page">
         <Link href="/login" className="legal-header">
           <img src="/images/YSSLogo.png" alt="" />
-          <span>YSS Cenral</span>
+          <span>Yoshi&apos;s Signalling Server</span>
         </Link>
         {content}
       </div>

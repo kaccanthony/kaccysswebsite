@@ -57,7 +57,7 @@ export interface BoardConfig {
   minLevel: number;
   table: string;
   primaryKey: string;
-  displayMode: 'table' | 'cards' | 'notification_composer';
+  displayMode: 'table' | 'cards' | 'notification_composer' | 'view_as';
   readOnly?: boolean;
   readOnlyReason?: string;
   comingSoon?: boolean;
@@ -65,9 +65,14 @@ export interface BoardConfig {
   /** True => this board is a join across two tables and does NOT go through the generic
    *  /api/manage/records route — it has its own dedicated route. See staff_directory. */
   joined?: boolean;
+  /** Hide the "Add Record" button — e.g. profiles can only be created via Discord OAuth. */
+  noCreate?: boolean;
+  /** Hide the row delete button — e.g. deleting a profile without deleting the underlying
+   *  Supabase Auth user would break that person's login. */
+  noDelete?: boolean;
 }
 
-export const GROUP_ORDER = ['Staff Management', 'Session Logs', 'Events', 'Admin Only'] as const;
+export const GROUP_ORDER = ['Staff Management', 'Session Logs', 'Events', 'Admin Only', 'Content'] as const;
 
 export function getTableConfig(): Record<string, BoardConfig> {
   return {
@@ -365,6 +370,71 @@ export function getTableConfig(): Record<string, BoardConfig> {
         event_attendees: { label: 'Attendees', type: 'textarea' },
         host_notes: { label: 'Host Notes', type: 'textarea' },
         status: { label: 'Status', type: 'text', pill: true },
+      },
+    },
+    // ── Users (admin-only manual correction, not a signup form) ───────
+    profiles: {
+      label: 'Users',
+      group: 'Admin Only',
+      minLevel: 20,
+      table: 'profiles',
+      primaryKey: 'id',
+      displayMode: 'table',
+      noCreate: true, // accounts only get created via Discord OAuth sign-in
+      noDelete: true, // deleting this row without deleting the Supabase Auth user breaks their login
+      columns: {
+        id: { label: 'Profile ID', type: 'text', editableOnCreate: false, editableOnUpdate: false },
+        discord_avatar_url: { label: 'Discord Avatar', type: 'discord_avatar', editableOnUpdate: false },
+        discord_username: { label: 'Discord Username', type: 'text' }, // editable for edge-case fixes —
+        // heads up: this WILL get overwritten next time your Discord sync job runs for that user
+        roblox_avatar_url: { label: 'Roblox Avatar', type: 'discord_avatar', editableOnUpdate: false },
+        roblox_username: { label: 'Roblox Username', type: 'text' },
+        nationality: { label: 'Nationality', type: 'text' },
+        num_sessions_attended: { label: 'Sessions Attended', type: 'number' },
+        hide_stats: { label: 'Hide Stats', type: 'bool' },
+        created_at: { label: 'Account Created', type: 'text', editableOnCreate: false, editableOnUpdate: false },
+      },
+    },
+
+    // ── Site Scripts (DB-backed, with real version history) ───────────
+    site_scripts: {
+      label: 'Site Scripts',
+      group: 'Content',
+      minLevel: 20,
+      table: 'site_scripts',
+      primaryKey: 'script_key',
+      displayMode: 'table',
+      columns: {
+        script_key: { label: 'Key', type: 'text', editableOnCreate: true, editableOnUpdate: false },
+        label: { label: 'Label', type: 'text' },
+        content: { label: 'Content', type: 'textarea' },
+        updated_at: { label: 'Last Updated', type: 'text', editableOnCreate: false, editableOnUpdate: false },
+      },
+    },
+    view_as: {
+      label: 'View As',
+      group: 'Admin Only',
+      minLevel: 20,
+      table: '', // no real table — rendered specially, see ManageBoard.tsx
+      primaryKey: 'id',
+      displayMode: 'view_as',
+      columns: {},
+    },
+    site_scripts_history: {
+      label: 'Script History',
+      group: 'Content',
+      minLevel: 20,
+      table: 'site_scripts_history',
+      primaryKey: 'history_id',
+      displayMode: 'table',
+      readOnly: true,
+      readOnlyReason: 'Automatic snapshots — every save to Site Scripts writes one of these first. View only; to roll back, copy the content you want back into the matching Site Scripts row.',
+      columns: {
+        history_id: { label: 'ID', type: 'number' },
+        script_key: { label: 'Script', type: 'text' },
+        content: { label: 'Content', type: 'textarea' },
+        saved_at: { label: 'Saved', type: 'text' },
+        saved_by: { label: 'Saved By', type: 'text', resolveId: true },
       },
     },
   };
