@@ -27,7 +27,7 @@ import type {
   UnallocatedTrainee, TimeTracker, OverridesState, AnnouncementPayload, BellStateRow,
   ViewerRole, MyRole,
 } from '@/types/session';
-import styles from './sessionongoing.module.css';
+import styles from './sessionongoing.css';
 
 // ── helpers ported 1:1 from sessionongoing.js ──
 function fmt(s: number): string {
@@ -191,7 +191,7 @@ export default function SessionOngoingClient(props: Props) {
     return () => clearInterval(id);
   }, [pushState]);
 
-  // ── global elapsed-time clock (replaces the setInterval on #global-timer-display) ──
+  // ── global elapsed-time clock (replaces the setInterval 'on' #global-timer-display) ──
   useEffect(() => {
     const startMs = session.started_at ? new Date(session.started_at).getTime() : Date.now();
     const id = setInterval(() => setElapsed(Math.max(0, Math.floor((Date.now() - startMs) / 1000))), 1000);
@@ -361,59 +361,59 @@ export default function SessionOngoingClient(props: Props) {
   const [stationCode, setStationCode] = useState(STATION_LIST[0].code);
 
   return (
-    <div className={styles.wrap}>
+    <div className="wrap">
       {/* ── Header / profile popup — same structure as sessionongoing.php's <header class="topbar"> ── */}
-      <header className={styles.topbar}>
-        <span className={styles.appName}>YSS Session Manager</span>
-        <div className={styles.livePill}><span className={styles.liveDot} /> LIVE SESSION</div>
-        <span className={styles.syncNote}>synced {Math.floor((Date.now() - lastSyncedAt) / 1000)}s ago</span>
-        <div className={styles.profileMeta}>
-          {avatarUrl ? <Image src={avatarUrl} alt="" width={32} height={32} className={styles.avatar} /> : <FontAwesomeIcon icon={ICONS.user} />}
-          <span>{username}</span><span className={styles.profileRole}>{roleDisplay}</span>
+      <header className="topbar">
+        <span className="appName">YSS Session Manager</span>
+        <div className="livePill"><span className="liveDot" /> LIVE SESSION</div>
+        <span className="syncNote">synced {Math.floor((Date.now() - lastSyncedAt) / 1000)}s ago</span>
+        <div className="profileMeta">
+          {avatarUrl ? <Image src={avatarUrl} alt="" width={32} height={32} className="avatar" /> : <FontAwesomeIcon icon={ICONS.user} />}
+          <span>{username}</span><span className="profileRole">{roleDisplay}</span>
         </div>
       </header>
 
       <main>
-        <div className={styles.sessionHead}>
-          <div className={styles.sessionTitle}>Session #{sessionId} — {session.session_name || 'Untitled Session'}</div>
-          <div className={styles.sessionSub}>Viewing as <strong>{viewerRole}</strong></div>
+        <div className="sessionHead">
+          <div className="sessionTitle">Session #{sessionId} — {session.session_name || 'Untitled Session'}</div>
+          <div className="sessionSub">Viewing as <strong>{viewerRole}</strong></div>
         </div>
 
         {/* ── Session Controls (host only) ── */}
         {isHost && (
-          <section className={styles.panel}>
-            <div className={styles.panelTitle}>Session Controls</div>
-            <div className={styles.overrideColumns}>
-              <div className={styles.overrideCol}>
-                <button className={`${styles.ovrBtn} ${overrides['session-details'] ? styles.on : ''}`} onClick={() => toggleOverride('session-details')}>
+          <section className="panel">
+            <div className="panelTitle">Session Controls</div>
+            <div className="overrideColumns">
+              <div className="overrideCol">
+                <button className={`ovrBtn ${overrides['session-details'] ? 'on' : ''}`} onClick={() => toggleOverride('session-details')}>
                   <FontAwesomeIcon icon={ICONS.lock} /> Override Session Details
                 </button>
-                <button className={`${styles.ovrBtn} ${overrides.trainees ? styles.on : ''}`} onClick={() => toggleOverride('trainees')}>
+                <button className={`ovrBtn ${overrides.trainees ? 'on' : ''}`} onClick={() => toggleOverride('trainees')}>
                   <FontAwesomeIcon icon={ICONS.userPlus} /> Override Trainees
                 </button>
-                <button className={`${styles.ovrBtn} ${overrides['trainee-details'] ? styles.on : ''}`} onClick={() => toggleOverride('trainee-details')}>
+                <button className={`ovrBtn ${overrides['trainee-details'] ? 'on' : ''}`} onClick={() => toggleOverride('trainee-details')}>
                   <FontAwesomeIcon icon={ICONS.idCard} /> Override Trainee Details
                 </button>
-                <button className={`${styles.ovrBtn} ${overrides['slot-order'] ? styles.on : ''}`} onClick={() => toggleOverride('slot-order')}>
+                <button className={`ovrBtn ${overrides['slot-order'] ? 'on' : ''}`} onClick={() => toggleOverride('slot-order')}>
                   <FontAwesomeIcon icon={ICONS.arrowUpWideShort} /> Override Slot Ordering
                 </button>
               </div>
-              <div className={styles.overrideCol}>
-                <button className={`${styles.ovrBtn} ${overrides['staff-roles'] ? styles.on : ''}`} onClick={() => toggleOverride('staff-roles')}>
+              <div className="overrideCol">
+                <button className={`ovrBtn ${overrides['staff-roles'] ? 'on' : ''}`} onClick={() => toggleOverride('staff-roles')}>
                   <FontAwesomeIcon icon={ICONS.userShield} /> Allow Assistant Override Staff Roles
                 </button>
-                <button className={`${styles.ovrBtn} ${overrides['drivers-disable'] ? styles.on : ''}`} onClick={() => toggleOverride('drivers-disable')}>
-                  <FontAwesomeIcon icon={ICONS.ban} /> Disable Assistant Input on Drivers
+                <button className={`ovrBtn ${overrides['drivers-disable'] ? 'on' : ''}`} onClick={() => toggleOverride('drivers-disable')}>
+                  <FontAwesomeIcon icon={ICONS.ban} /> Disable Assistant Input 'on' Drivers
                 </button>
               </div>
-              <div className={styles.overrideCol}>
-                <button className={`${styles.ovrBtn} ${overrides['trainer-details'] ? styles.on : ''}`} onClick={() => toggleOverride('trainer-details')}>
+              <div className="overrideCol">
+                <button className={`ovrBtn ${overrides['trainer-details'] ? 'on' : ''}`} onClick={() => toggleOverride('trainer-details')}>
                   <FontAwesomeIcon icon={ICONS.chalkboardUser} /> Override Trainer Assignment
                 </button>
-                <button className={`${styles.ovrBtn} ${styles.hostOnly} ${overrides['staff-delete'] ? styles.on : ''}`} onClick={() => toggleOverride('staff-delete')}>
+                <button className={`ovrBtn hostOnly ${overrides['staff-delete'] ? 'on' : ''}`} onClick={() => toggleOverride('staff-delete')}>
                   <FontAwesomeIcon icon={ICONS.userSlash} /> Override Staff Deletion (Host only)
                 </button>
-                <button className={`${styles.ovrBtn} ${styles.hostOnly} ${styles.dangerous} ${overrides['allow-all'] ? styles.on : ''}`} onClick={() => toggleOverride('allow-all')}>
+                <button className={`ovrBtn hostOnly dangerous ${overrides['allow-all'] ? 'on' : ''}`} onClick={() => toggleOverride('allow-all')}>
                   <FontAwesomeIcon icon={ICONS.triangleExclamation} /> Allow Override for Everyone
                 </button>
               </div>
@@ -422,18 +422,18 @@ export default function SessionOngoingClient(props: Props) {
         )}
 
         {/* ── Session Details ── */}
-        <section className={styles.panel}>
-          <div className={styles.panelTitle}>
+        <section className="panel">
+          <div className="panelTitle">
             Session Details
-            <span className={locked.sessionDetails ? styles.lockTagLocked : styles.lockTagUnlocked}>
+            <span className={locked.sessionDetails ? 'lockTagLocked' : 'lockTagUnlocked'}>
               <FontAwesomeIcon icon={locked.sessionDetails ? ICONS.lock : ICONS.lockOpen} /> {locked.sessionDetails ? 'Locked' : 'Unlocked'}
             </span>
           </div>
-          <div className={styles.infoGrid}>
-            <div className={styles.infoCell}>
-              <div className={styles.infoLabel}>Session Status</div>
+          <div className="infoGrid">
+            <div className="infoCell">
+              <div className="infoLabel">Session Status</div>
               <select
-                className={styles.cellInput}
+                className="cellInput"
                 value={statusValue}
                 disabled={!statusUnlocked}
                 onChange={(e) => { setStatusValue(e.target.value); dirtyRef.current.status = true; queueSync(); }}
@@ -444,28 +444,28 @@ export default function SessionOngoingClient(props: Props) {
                 <option value="concluded">Concluded</option>
               </select>
             </div>
-            <div className={styles.infoCell}>
-              <div className={styles.infoLabel}>Session Elapsed Time</div>
-              <div className={styles.globalTimerValue}>{fmtHMS(elapsed)}</div>
+            <div className="infoCell">
+              <div className="infoLabel">Session Elapsed Time</div>
+              <div className="globalTimerValue">{fmtHMS(elapsed)}</div>
             </div>
           </div>
         </section>
 
         {/* ── Time Tracker (host only) ── */}
         {isHost && (
-          <section className={styles.panel}>
-            <div className={styles.panelTitle}>Time Tracker</div>
-            <div className={styles.timeTrackerGrid}>
+          <section className="panel">
+            <div className="panelTitle">Time Tracker</div>
+            <div className="timeTrackerGrid">
               {(['briefingStart', 'sgShiftStart', 'screenieTime'] as const).map((key) => (
-                <div key={key} className={styles.timeTrackerRow}>
-                  <span className={styles.pipLabel}>
+                <div key={key} className="timeTrackerRow">
+                  <span className="pipLabel">
                     {key === 'briefingStart' ? 'Actual Briefing Start' : key === 'sgShiftStart' ? 'Actual SG Shift Start' : 'Actual Screenie Time'}
                   </span>
-                  <span className={styles.timeTrackerValue}>
+                  <span className="timeTrackerValue">
                     {timeTracker[key] ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(timeTracker[key]) + ' BST/GMT' : '— not recorded —'}
                   </span>
                   {!timeTracker[key] && (
-                    <button className={styles.miniOverrideBtn} onClick={() => { setTimeTracker((p) => ({ ...p, [key]: Date.now() })); queueSync(); }}>
+                    <button className="miniOverrideBtn" onClick={() => { setTimeTracker((p) => ({ ...p, [key]: Date.now() })); queueSync(); }}>
                       <FontAwesomeIcon icon={ICONS.play} />
                     </button>
                   )}
@@ -476,9 +476,9 @@ export default function SessionOngoingClient(props: Props) {
         )}
 
         {/* ── Trainees table ── */}
-        <section className={styles.panel}>
-          <div className={styles.panelTitle}>Trainees Panel</div>
-          <div className={styles.tableWrap}>
+        <section className="panel">
+          <div className="panelTitle">Trainees Panel</div>
+          <div className="tableWrap">
             <table>
               <thead>
                 <tr>
@@ -498,35 +498,35 @@ export default function SessionOngoingClient(props: Props) {
                   return (
                     <tr key={row}>
                       <td>{idx}</td>
-                      <td><input className={styles.cellInput} disabled={locked.traineeDetails} defaultValue={name} onBlur={(e) => { dirtyRef.current.traineeRows.add(row); queueSync(); }} /></td>
-                      <td><input className={styles.cellInput} disabled={locked.traineeDetails} defaultValue={session[`trainee_${idx}_discord_id`] as string ?? ''} /></td>
-                      <td><input className={styles.cellInput} disabled={locked.traineeDetails} defaultValue={session[`trainee_${idx}_discord`] as string ?? ''} /></td>
+                      <td><input className="cellInput" disabled={locked.traineeDetails} defaultValue={name} onBlur={(e) => { dirtyRef.current.traineeRows.add(row); queueSync(); }} /></td>
+                      <td><input className="cellInput" disabled={locked.traineeDetails} defaultValue={session[`trainee_${idx}_discord_id`] as string ?? ''} /></td>
+                      <td><input className="cellInput" disabled={locked.traineeDetails} defaultValue={session[`trainee_${idx}_discord`] as string ?? ''} /></td>
                       <td>
-                        <select className={styles.cellInput} disabled={locked.traineeDetails} defaultValue={zone}>
+                        <select className="cellInput" disabled={locked.traineeDetails} defaultValue={zone}>
                           <option>Select</option>
                           {ZONES.map((z) => <option key={z} value={z}>{z}</option>)}
                         </select>
                       </td>
-                      <td className={styles.timerCell}>
-                        <span className={`${styles.timerDisplay} ${t.running ? styles.running : live <= 60 ? styles.low : ''}`}>{fmt(live)}</span>
+                      <td className="timerCell">
+                        <span className={`timerDisplay ${t.running ? 'running' : ''} ${live <= 60 ? 'low' : ''}`}>{fmt(live)}</span>
                         {!isAssistant && (
                           <>
-                            <button className={styles.timerBtn} onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t.running ? ICONS.pause : ICONS.play} /></button>
-                            <button className={styles.timerBtn} onClick={() => resetTimer(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.redo} /></button>
-                            <button className={styles.timerBtn} onClick={() => recordSetupDone(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.check} /></button>
+                            <button className="timerBtn" onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t.running ? ICONS.pause : ICONS.play} /></button>
+                            <button className="timerBtn" onClick={() => resetTimer(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.redo} /></button>
+                            <button className="timerBtn" onClick={() => recordSetupDone(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.check} /></button>
                           </>
                         )}
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         <input
                           type="checkbox"
-                          className={styles.chk}
+                          className="chk"
                           checked={attendance[row] ?? false}
                           onChange={(e) => { setAttendance((prev) => ({ ...prev, [row]: e.target.checked })); dirtyRef.current.attendance = true; queueSync(); }}
                         />
                       </td>
                       <td>
-                        <select className={styles.cellInput} disabled={locked.trainerDetails} defaultValue={trainer}>
+                        <select className="cellInput" disabled={locked.trainerDetails} defaultValue={trainer}>
                           <option value="">— None —</option>
                           <option value={session.host}>{session.host}</option>
                           {eligibleStaff['Co-Host'].map((n) => <option key={n} value={n}>{n}</option>)}
@@ -534,26 +534,27 @@ export default function SessionOngoingClient(props: Props) {
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         {!isAssistant && (
-                          <button className={styles.feedbackBtn} onClick={() => setFeedbackModalRow(row)}>
+                          <button className="feedbackBtn" onClick={() => setFeedbackModalRow(row)}>
                             <FontAwesomeIcon icon={ICONS.commentDots} /> Feedback
                           </button>
                         )}
                       </td>
                       <td>
-                        <div className={styles.announcementCell}>
-                          <button className={styles.announcementCopyBtn} onClick={() => navigator.clipboard.writeText(resolveAnnouncement(row, name, trainer, zone))}>
+                        <div className="announcementCell">
+                          <button className="announcementCopyBtn" onClick={() => navigator.clipboard.writeText(resolveAnnouncement(row, name, trainer, zone))}>
                             <FontAwesomeIcon icon={ICONS.copy} />
                           </button>
                         </div>
                       </td>
-                      <td><textarea className={styles.cellInput} rows={1} /></td>
+                      <td><textarea className="cellInput" rows={1} /></td>
                       <td style={{ textAlign: 'center' }}>
-                        <button className={`${styles.completeBtn} ${completedRows[row] ? styles.done : ''}`} disabled={isAssistant} onClick={() => toggleComplete(row)}>
+                      <button className={`completeBtn ${completedRows[row] ? 'done' : ''}`}
+                      disabled={isAssistant} onClick={() => toggleComplete(row)} >
                           {completedRows[row] ? 'Done' : 'Mark done'}
                         </button>
                       </td>
                       <td style={{ textAlign: 'center' }}>
-                        <button className={styles.rowDelBtn} disabled={locked.trainees}><FontAwesomeIcon icon={ICONS.trash} /></button>
+                        <button className="rowDelBtn" disabled={locked.trainees}><FontAwesomeIcon icon={ICONS.trash} /></button>
                       </td>
                     </tr>
                   );
@@ -561,18 +562,18 @@ export default function SessionOngoingClient(props: Props) {
                 {unallocated.map((u) => (
                   <tr key={u.uid}>
                     <td>Unalloc.</td>
-                    <td><input className={styles.cellInput} disabled={locked.traineeDetails} defaultValue={u.discord} /></td>
-                    <td><input className={styles.cellInput} disabled={locked.traineeDetails} defaultValue={u.discordId} /></td>
-                    <td><input className={styles.cellInput} disabled={locked.traineeDetails} defaultValue={u.roblox} /></td>
+                    <td><input className="cellInput" disabled={locked.traineeDetails} defaultValue={u.discord} /></td>
+                    <td><input className="cellInput" disabled={locked.traineeDetails} defaultValue={u.discordId} /></td>
+                    <td><input className="cellInput" disabled={locked.traineeDetails} defaultValue={u.roblox} /></td>
                     <td>
-                      <select className={styles.cellInput} disabled={locked.traineeDetails} defaultValue={u.zone}>
+                      <select className="cellInput" disabled={locked.traineeDetails} defaultValue={u.zone}>
                         <option>Select</option>{ZONES.map((z) => <option key={z} value={z}>{z}</option>)}
                       </select>
                     </td>
                     <td colSpan={7} />
                     <td style={{ textAlign: 'center' }}>
                       <button
-                        className={styles.rowDelBtn}
+                        className="rowDelBtn"
                         disabled={locked.trainees}
                         onClick={() => { setUnallocated((prev) => prev.filter((x) => x.uid !== u.uid)); queueSync(); }}
                       >
@@ -584,69 +585,69 @@ export default function SessionOngoingClient(props: Props) {
               </tbody>
             </table>
           </div>
-          <div className={styles.addRowBar}>
-            <button className={styles.addBtn} disabled={locked.trainees} onClick={addUnallocatedTrainee}>
+          <div className="addRowBar">
+            <button className="addBtn" disabled={locked.trainees} onClick={addUnallocatedTrainee}>
               <FontAwesomeIcon icon={ICONS.plus} /> Add unallocated trainee
             </button>
           </div>
         </section>
 
         {/* ── Drivers & Staff ── */}
-        <div className={styles.twoCol}>
-          <section className={styles.panel}>
-            <div className={styles.panelTitle}>Drivers</div>
-            <table className={styles.driversTable}>
+        <div className="twoCol">
+          <section className="panel">
+            <div className="panelTitle">Drivers</div>
+            <table className="driversTable">
               <thead><tr><th>Discord</th><th>Roblox</th><th>Attendance</th><th /></tr></thead>
               <tbody>
                 {drivers.map((d, i) => (
                   <tr key={i}>
-                    <td><input className={styles.cellInput} disabled={locked.driversDisabled} defaultValue={d.discord}
+                    <td><input className="cellInput" disabled={locked.driversDisabled} defaultValue={d.discord}
                       onBlur={(e) => { setDrivers((p) => p.map((x, j) => j === i ? { ...x, discord: e.target.value } : x)); queueSync(); }} /></td>
-                    <td><input className={styles.cellInput} disabled={locked.driversDisabled} defaultValue={d.roblox}
+                    <td><input className="cellInput" disabled={locked.driversDisabled} defaultValue={d.roblox}
                       onBlur={(e) => { setDrivers((p) => p.map((x, j) => j === i ? { ...x, roblox: e.target.value } : x)); queueSync(); }} /></td>
                     <td style={{ textAlign: 'center' }}>
-                      <input type="checkbox" className={styles.chk} disabled={locked.driversDisabled} checked={d.attended}
+                      <input type="checkbox" className="chk" disabled={locked.driversDisabled} checked={d.attended}
                         onChange={(e) => { setDrivers((p) => p.map((x, j) => j === i ? { ...x, attended: e.target.checked } : x)); queueSync(); }} />
                     </td>
-                    <td><button className={styles.rowDelBtn} onClick={() => { setDrivers((p) => p.filter((_, j) => j !== i)); queueSync(); }}><FontAwesomeIcon icon={ICONS.trash} /></button></td>
+                    <td><button className="rowDelBtn" onClick={() => { setDrivers((p) => p.filter((_, j) => j !== i)); queueSync(); }}><FontAwesomeIcon icon={ICONS.trash} /></button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            <div className={styles.addRowBar}>
-              <button className={styles.addBtn} onClick={() => { setDrivers((p) => [...p, { discord: '', roblox: '', attended: false }]); queueSync(); }}>
+            <div className="addRowBar">
+              <button className="addBtn" onClick={() => { setDrivers((p) => [...p, { discord: '', roblox: '', attended: false }]); queueSync(); }}>
                 <FontAwesomeIcon icon={ICONS.plus} /> Add driver
               </button>
             </div>
           </section>
 
-          <section className={styles.panel}>
-            <div className={styles.panelTitle}>Staff</div>
-            <table className={styles.staffTable}>
+          <section className="panel">
+            <div className="panelTitle">Staff</div>
+            <table className="staffTable">
               <thead><tr><th>Role in Shift</th><th>Discord</th><th>Attendance</th><th>Notes</th><th /></tr></thead>
               <tbody>
                 {staffShift.map((s, i) => (
                   <tr key={i}>
                     <td>
-                      <select className={styles.cellInput} disabled={locked.staffRoles} value={s.role}
+                      <select className="cellInput" disabled={locked.staffRoles} value={s.role}
                         onChange={(e) => { setStaffShift((p) => p.map((x, j) => j === i ? { ...x, role: e.target.value as StaffShiftRow['role'] } : x)); dirtyRef.current.staffCore = true; queueSync(); }}>
                         {STAFF_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                       </select>
                     </td>
                     <td>
-                      <select className={styles.cellInput} value={s.discord}
+                      <select className="cellInput" value={s.discord}
                         onChange={(e) => { setStaffShift((p) => p.map((x, j) => j === i ? { ...x, discord: e.target.value } : x)); dirtyRef.current.staffCore = true; queueSync(); }}>
                         <option value="">— Select —</option>
                         {(s.role === 'Co-Host' ? eligibleStaff['Co-Host'] : s.role === 'Assistant' ? eligibleStaff.Assistant : Object.keys(staffDirectory)).map((n) => <option key={n} value={n}>{n}</option>)}
                       </select>
                     </td>
                     <td style={{ textAlign: 'center' }}>
-                      <input type="checkbox" className={styles.chk} checked={s.attended}
+                      <input type="checkbox" className="chk" checked={s.attended}
                         onChange={(e) => { setStaffShift((p) => p.map((x, j) => j === i ? { ...x, attended: e.target.checked } : x)); queueSync(); }} />
                     </td>
-                    <td><input className={styles.cellInput} defaultValue={s.notes} onBlur={(e) => { setStaffShift((p) => p.map((x, j) => j === i ? { ...x, notes: e.target.value } : x)); queueSync(); }} /></td>
+                    <td><input className="cellInput" defaultValue={s.notes} onBlur={(e) => { setStaffShift((p) => p.map((x, j) => j === i ? { ...x, notes: e.target.value } : x)); queueSync(); }} /></td>
                     <td>
-                      <button className={styles.rowDelBtn} disabled={locked.staffDelete} onClick={() => { setStaffShift((p) => p.filter((_, j) => j !== i)); dirtyRef.current.staffCore = true; queueSync(); }}>
+                      <button className="rowDelBtn" disabled={locked.staffDelete} onClick={() => { setStaffShift((p) => p.filter((_, j) => j !== i)); dirtyRef.current.staffCore = true; queueSync(); }}>
                         <FontAwesomeIcon icon={ICONS.trash} />
                       </button>
                     </td>
@@ -654,8 +655,8 @@ export default function SessionOngoingClient(props: Props) {
                 ))}
               </tbody>
             </table>
-            <div className={styles.addRowBar}>
-              <button className={styles.addBtn} disabled={staffShift.length >= 10}
+            <div className="addRowBar">
+              <button className="addBtn" disabled={staffShift.length >= 10}
                 onClick={() => { setStaffShift((p) => [...p, { role: 'Assistant', discord: '', notes: '', attended: false }]); dirtyRef.current.staffCore = true; queueSync(); }}>
                 <FontAwesomeIcon icon={ICONS.plus} /> Add staff member
               </button>
@@ -664,16 +665,16 @@ export default function SessionOngoingClient(props: Props) {
         </div>
 
         {/* ── Station generator ── */}
-        <section className={styles.panel}>
-          <div className={styles.panelTitle}><FontAwesomeIcon icon={ICONS.cameraRetro} /> Screenshot Station</div>
-          <div className={styles.stationGenRow}>
-            <select className={styles.cellInput} value={stationCode} onChange={(e) => setStationCode(e.target.value)}>
+        <section className="panel">
+          <div className="panelTitle"><FontAwesomeIcon icon={ICONS.cameraRetro} /> Screenshot Station</div>
+          <div className="stationGenRow">
+            <select className="cellInput" value={stationCode} onChange={(e) => setStationCode(e.target.value)}>
               {STATION_LIST.map((s) => <option key={s.code} value={s.code}>{s.code} — {s.name}</option>)}
             </select>
-            <button className={styles.miniOverrideBtn} onClick={() => setStationCode(STATION_LIST[Math.floor(Math.random() * STATION_LIST.length)].code)}>
+            <button className="miniOverrideBtn" onClick={() => setStationCode(STATION_LIST[Math.floor(Math.random() * STATION_LIST.length)].code)}>
               <FontAwesomeIcon icon={ICONS.shuffle} />
             </button>
-            <button className={styles.announcementCopyBtn} onClick={() => {
+            <button className="announcementCopyBtn" onClick={() => {
               const station = STATION_LIST.find((s) => s.code === stationCode)!;
               navigator.clipboard.writeText(buildStationAnnouncement(station));
             }}>
@@ -684,11 +685,11 @@ export default function SessionOngoingClient(props: Props) {
 
         {/* ── Conclude ── */}
         {isHost && (
-          <section className={styles.panel}>
-            <div className={styles.panelTitle}>Session Wrap-Up</div>
-            <div className={styles.concludePanelBody}>
-              <p className={styles.concludeDesc}>Concluding the session finalizes it — only available while In Progress or Cancelled.</p>
-              <button className={styles.mbtnDanger} disabled={!concludeUnlocked} onClick={concludeSession}>
+          <section className="panel">
+            <div className="panelTitle">Session Wrap-Up</div>
+            <div className="concludePanelBody">
+              <p className="concludeDesc">Concluding the session finalizes it — only available while In Progress or Cancelled.</p>
+              <button className="mbtnDanger" disabled={!concludeUnlocked} onClick={concludeSession}>
                 <FontAwesomeIcon icon={ICONS.flagCheckered} /> Conclude Session
               </button>
             </div>
@@ -696,10 +697,10 @@ export default function SessionOngoingClient(props: Props) {
         )}
 
         {/* ── Main AST notes ── */}
-        <section className={styles.panel}>
-          <div className={styles.panelTitle}>Main AST Notes</div>
+        <section className="panel">
+          <div className="panelTitle">Main AST Notes</div>
           <textarea
-            className={styles.cellInput}
+            className="cellInput"
             rows={6}
             style={{ width: '100%' }}
             value={mainAstNotes}
@@ -707,7 +708,7 @@ export default function SessionOngoingClient(props: Props) {
           />
           {isHost && (
             <button
-              className={styles.mbtnPrimary}
+              className="mbtnPrimary"
               style={{ marginTop: 10 }}
               onClick={() => {
                 const mainAstList = staffShift.filter((s) => s.role === 'Main AST').map((s) => s.discord).filter(Boolean);
@@ -760,8 +761,8 @@ export default function SessionOngoingClient(props: Props) {
       </main>
 
       {/* ── Bell widget ── */}
-      <div className={styles.bellWidget}>
-        <button className={styles.bellFab} onClick={() => {
+      <div className="bellWidget">
+        <button className="bellFab" onClick={() => {
           if (myRole === 'assistant') { if (bell?.active) ackBell('assistant'); return; }
           if (!bell?.active || bell.initiator_role === myRole) ringBell(myRole as 'host' | 'cohost');
           else ackBell(myRole);
@@ -771,24 +772,24 @@ export default function SessionOngoingClient(props: Props) {
       </div>
 
       {/* ── Toasts ── */}
-      <div className={styles.toastContainer}>
+      <div className="toastContainer">
         {toasts.map((t) => (
-          <div key={t.id} className={`${styles.toast} ${styles.show}`}>
-            <div className={styles.toastMsg}><FontAwesomeIcon icon={ICONS.lock} /> {t.message}</div>
+          <div key={t.id} className="toast show">
+            <div className="toastMsg"><FontAwesomeIcon icon={ICONS.lock} /> {t.message}</div>
           </div>
         ))}
       </div>
 
       {/* ── Confirm modal ── */}
       {confirmState && (
-        <div className={styles.modalOverlay} style={{ display: 'flex' }}>
-          <div className={styles.modal} style={{ maxWidth: 440 }}>
-            <div className={styles.modalHead}><h2>{confirmState.title}</h2></div>
-            <div className={styles.modalBody}>
-              <p className={styles.confirmMessage}>{confirmState.message}</p>
-              <div className={styles.modalFooter}>
-                <button className={styles.mbtn} onClick={() => { confirmState.resolve(false); setConfirmState(null); }}>Cancel</button>
-                <button className={styles.mbtnDanger} onClick={() => { confirmState.resolve(true); setConfirmState(null); }}>Yes, allow it</button>
+        <div className="modalOverlay" style={{ display: 'flex' }}>
+          <div className="modal" style={{ maxWidth: 440 }}>
+            <div className="modalHead"><h2>{confirmState.title}</h2></div>
+            <div className="modalBody">
+              <p className="confirmMessage">{confirmState.message}</p>
+              <div className="modalFooter">
+                <button className="mbtn" onClick={() => { confirmState.resolve(false); setConfirmState(null); }}>Cancel</button>
+                <button className="mbtnDanger" onClick={() => { confirmState.resolve(true); setConfirmState(null); }}>Yes, allow it</button>
               </div>
             </div>
           </div>
@@ -797,26 +798,26 @@ export default function SessionOngoingClient(props: Props) {
 
       {/* ── Feedback modal ── */}
       {feedbackModalRow !== null && (
-        <div className={styles.modalOverlay} style={{ display: 'flex' }}>
-          <div className={styles.modal}>
-            <div className={styles.modalHead}>
+        <div className="modalOverlay" style={{ display: 'flex' }}>
+          <div className="modal">
+            <div className="modalHead">
               <h2>TRAINER FEEDBACK</h2>
-              <button className={styles.modalClose} onClick={() => setFeedbackModalRow(null)}><FontAwesomeIcon icon={ICONS.xmark} /></button>
+              <button className="modalClose" onClick={() => setFeedbackModalRow(null)}><FontAwesomeIcon icon={ICONS.xmark} /></button>
             </div>
-            <div className={styles.modalBody}>
+            <div className="modalBody">
               {(['setup', 'conflict', 'priority', 'rbtiming', 'overall', 'notes'] as const).map((field) => (
-                <div key={field} className={styles.feedbackRow}>
-                  <label className={styles.feedbackLabel}>{field}</label>
+                <div key={field} className="feedbackRow">
+                  <label className="feedbackLabel">{field}</label>
                   <textarea
-                    className={styles.feedbackText}
+                    className="feedbackText"
                     value={getFeedback(feedbackModalRow)[field]}
                     onChange={(e) => updateFeedback(feedbackModalRow, field, e.target.value)}
                   />
                 </div>
               ))}
-              <div className={styles.modalFooter}>
-                <button className={styles.mbtn} onClick={() => setFeedbackModalRow(null)}>Cancel</button>
-                <button className={styles.mbtnPrimary} onClick={() => setFeedbackModalRow(null)}>Save feedback</button>
+              <div className="modalFooter">
+                <button className="mbtn" onClick={() => setFeedbackModalRow(null)}>Cancel</button>
+                <button className="mbtnPrimary" onClick={() => setFeedbackModalRow(null)}>Save feedback</button>
               </div>
             </div>
           </div>
