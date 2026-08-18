@@ -3,6 +3,7 @@ import Link from 'next/link';
 import type { LegalDoc } from '@/lib/legal-content';
 import { getCurrentUserOrNull } from '@/lib/getCurrentUserOrNull';
 import { formatNameWithPrefix, getRoleLabel } from '@/lib/roles';
+import { createClient } from '@/utils/supabase/server';
 import AppShell from '@/app/(app)/AppShell';
 import './legal.css';
 
@@ -62,6 +63,17 @@ export default async function LegalPage({
     // so a logged-in visitor sees the exact same header here as everywhere else in the app.
     const roleInfo = { rawRole: user.rawRole, isStaff: user.isStaff, isAdmin: user.isAdmin };
 
+    // Same unread-count query as app/(app)/layout.tsx — a signed-in visitor reading a legal
+    // page still has real notifications, so the bell badge shouldn't go silent here just
+    // because this page doesn't otherwise need Supabase for anything else.
+    const supabase = await createClient();
+    const [{ data: recipientRows }, { data: readRows }] = await Promise.all([
+      supabase.from('notification_recipients').select('notif_id').eq('profile_id', user.id),
+      supabase.from('notification_reads').select('notif_id').eq('profile_id', user.id),
+    ]);
+    const readSet = new Set((readRows ?? []).map((r) => r.notif_id));
+    const unreadCount = (recipientRows ?? []).filter((r) => !readSet.has(r.notif_id)).length;
+
     return (
       <AppShell
         user={{
@@ -76,6 +88,7 @@ export default async function LegalPage({
         // this just shows the normal "No active sessions" pill in the popup, same as any
         // other page a staff member visits with nothing currently assigned.
         assignedSessions={[]}
+        unreadCount={unreadCount}
       >
         <div className="legal-page legal-page-authed">{content}</div>
       </AppShell>
