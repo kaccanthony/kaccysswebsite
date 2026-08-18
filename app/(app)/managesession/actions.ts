@@ -69,15 +69,15 @@ export async function deleteSession(formData: FormData) {
 // ── Primary staff roles, per your new convention: HOST / CH_1-4 / AST_1-4.
 // CH_3 and CH_4 each get an optional ", IH" suffix from their checkbox. ──
 const PRIMARY_ROLES = [
-  { role: 'HOST', field: 'host' },
-  { role: 'CH_1', field: 'co_host1' },
-  { role: 'CH_2', field: 'co_host2' },
+  { role: 'HOST', field: 'host', ihField: null },
+  { role: 'CH_1', field: 'co_host1', ihField: null },
+  { role: 'CH_2', field: 'co_host2', ihField: null },
   { role: 'CH_3', field: 'co_host3', ihField: 'co_host3_ih' },
   { role: 'CH_4', field: 'co_host4_supervisor', ihField: 'co_host4_ih' },
-  { role: 'AST_1', field: 'assistant_1' },
-  { role: 'AST_2', field: 'assistant_2' },
-  { role: 'AST_3', field: 'assistant_3' },
-  { role: 'AST_4', field: 'assistant_4' },
+  { role: 'AST_1', field: 'assistant_1', ihField: null },
+  { role: 'AST_2', field: 'assistant_2', ihField: null },
+  { role: 'AST_3', field: 'assistant_3', ihField: null },
+  { role: 'AST_4', field: 'assistant_4', ihField: null },
 ] as const;
 
 export async function saveSession(formData: FormData) {
