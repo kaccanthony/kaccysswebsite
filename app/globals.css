@@ -111,20 +111,53 @@ html, body {
 .consent-row {
     display: flex;
     align-items: flex-start;
-    gap: 9px;
+    gap: 10px;
     margin-bottom: 16px;
+    padding: 2px 0;
     font-size: 0.78rem;
     line-height: 1.4;
     color: rgba(255,255,255,0.55);
     cursor: pointer;
     text-align: left;
 }
+/* appearance:none + explicit size — the native checkbox this replaced was
+   ~13-16px, well under the ~24px minimum tappable size, which is why it felt
+   unresponsive on mobile. The checkmark itself is drawn with a ::after
+   pseudo-element since appearance:none also drops the native check glyph. */
 .consent-row input[type="checkbox"] {
-    margin-top: 2px;
-    accent-color: rgba(255,255,255,0.85);
+    appearance: none;
+    -webkit-appearance: none;
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    margin-top: -1px;
+    border-radius: 6px;
+    border: 1.5px solid rgba(255,255,255,0.35);
+    background: rgba(255,255,255,0.06);
+    cursor: pointer;
+    position: relative;
     flex-shrink: 0;
+    touch-action: manipulation;
+    transition: background .15s, border-color .15s;
 }
-.consent-row a { color: rgba(255,255,255,0.80); text-decoration: underline; }
+.consent-row input[type="checkbox"]:checked {
+    background: rgba(255,255,255,0.92);
+    border-color: rgba(255,255,255,0.92);
+}
+.consent-row input[type="checkbox"]:checked::after {
+    content: '';
+    position: absolute;
+    left: 7px;
+    top: 3px;
+    width: 5px;
+    height: 10px;
+    border: solid #000;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+/* z-index above the checkbox so the link remains reliably tappable/clickable
+   even though it's visually inline with the label text. */
+.consent-row a { position: relative; z-index: 1; color: rgba(255,255,255,0.80); text-decoration: underline; }
 .consent-row a:hover { color: #fff; }
 
 .btn-discord { background: #5865F2; color: #fff; }

@@ -15,7 +15,8 @@ import {
   faCopy, faBullhorn, faReply, faPaperPlane, faCameraRetro, faTableColumns,
   faFlagCheckered, faClipboardList, faCog, faPen, faSquareCheck,
 } from '@fortawesome/free-solid-svg-icons';
-import { faDiscord } from '@fortawesome/free-brands-svg-icons';
+import { faDiscord, faRobloxCreatorStudio, } from '@fortawesome/free-brands-svg-icons';
+import { getRobloxThumbnailUrl } from './robloxThumbnails';
 
 export const ICONS = {
   clock: faClock,
@@ -72,6 +73,7 @@ export const ICONS = {
   cog: faCog,
   pen: faPen,
   squareCheck: faSquareCheck,
+  robloxCreatorStudio: faRobloxCreatorStudio,
 } as const;
 
 export type IconKey = keyof typeof ICONS;

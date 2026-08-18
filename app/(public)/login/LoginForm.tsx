@@ -97,10 +97,11 @@ export default function LoginForm({
 
         {!discordDone && (
           <label className="consent-row">
-            <input type="checkbox" checked={consented} onChange={(e) => setConsented(e.target.checked)} />
+            <input type="checkbox" checked={consented} onChange={(e) => { console.log('checkbox fired, value:', e.target.checked); setConsented(e.target.checked); }} />
             <span>
-              I agree to the <a href="/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a> and{' '}
-              <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+              I agree to the{' '}
+              <a href="/terms" target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>Terms of Service</a> and{' '}
+              <a href="/privacy" target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>Privacy Policy</a>
             </span>
           </label>
         )}
@@ -137,6 +138,9 @@ export default function LoginForm({
             onClick={handleRobloxSignIn}
             disabled={loading || !discordDone}
           >
+            {/* Add a licensed Roblox logo asset at public/images/roblox-logo.svg — not
+                reproduced here since it's a trademarked logo, not a font-awesome icon. */}
+            <FontAwesomeIcon icon={ICONS.robloxCreatorStudio} />
             {loading && discordDone ? 'Redirecting…' : 'Continue with Roblox'}
           </button>
         </div>
