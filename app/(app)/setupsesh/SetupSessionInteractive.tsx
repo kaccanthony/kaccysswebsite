@@ -354,7 +354,7 @@ function SetupModal({
                   trainerMode={trainerMode}
                   autoTrainer={autoPreview[n - 1] ?? ''}
                   sessionDateISO={session.session_date}
-                  sessionHost={session.host}
+                  sessionHost={findPrimaryStaff(session.staffRows, 'HOST')}
                 />
               );
             })}
