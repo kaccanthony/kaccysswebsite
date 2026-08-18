@@ -107,7 +107,7 @@ export function checkIdentityFields(discordId: string, discordUsername: string, 
   if (!discordId) missing.push('Discord ID');
   if (!discordUsername) missing.push('Discord Username');
   if (!robloxUsername) missing.push('Roblox Username');
-  return { ok: missing.length === 0, missing };
+  return { ok: missing.length === 0, anyProvided: missing.length < 3, missing };
 }
 
 export interface FormatCheck {
