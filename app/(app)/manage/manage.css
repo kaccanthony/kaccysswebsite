@@ -151,3 +151,24 @@
   .ms-sidebar { display: flex; overflow-x: auto; gap: 6px; border-right: none; border-bottom: 1px solid rgba(255,255,255,.09); padding: 12px; }
   .ms-group-label { display: none; }
 }
+.ms-notif-pill.cat-feedback { background: #f2789c; color: #3d0a1a; }
+
+.ms-audience-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: .72rem;
+    font-weight: 600;
+    border: 1px solid rgba(255,255,255,.14);
+    background: rgba(255,255,255,.04);
+    color: rgba(255,255,255,.6);
+    cursor: pointer;
+    font-family: inherit;
+    transition: background .15s, color .15s, border-color .15s;
+}
+.ms-audience-pill.selected {
+    background: rgba(124,196,255,.14);
+    border-color: rgba(124,196,255,.4);
+    color: #7cc4ff;
+}

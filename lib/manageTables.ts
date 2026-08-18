@@ -72,7 +72,7 @@ export interface BoardConfig {
   noDelete?: boolean;
 }
 
-export const GROUP_ORDER = ['Staff Management', 'Session Logs', 'Events', 'Admin Only', 'Content'] as const;
+export const GROUP_ORDER = ['Staff Management', 'Announcements', 'Session Logs', 'Events', 'Admin Only', 'Content'] as const;
 
 export function getTableConfig(): Record<string, BoardConfig> {
   return {
@@ -166,11 +166,10 @@ export function getTableConfig(): Record<string, BoardConfig> {
       },
     },
 
-    // ── Admin Only ────────────────────────────────────────────────────
-    notifications: {
+          notifications: {
       label: 'Announcements',
-      group: 'Admin Only',
-      minLevel: 20,
+      group: 'Announcements',
+      minLevel: 15, // was 20 — Managers can post too now, category restriction handled in the composer + server action
       table: 'notifications',
       primaryKey: 'notif_id',
       displayMode: 'notification_composer',
@@ -178,25 +177,12 @@ export function getTableConfig(): Record<string, BoardConfig> {
         notif_id: { label: 'ID', type: 'number', editableOnCreate: false, editableOnUpdate: false },
         category: {
           label: 'Category', type: 'select', pill: true,
-          options: ['Session', 'Event', 'Website', 'System', 'Manager', 'Admin', 'Update'],
+          options: ['Session', 'Event', 'Feedback', 'Website', 'Manager', 'System', 'Admin', 'Update'],
         },
         title: { label: 'Title', type: 'text' },
         description: { label: 'Description', type: 'textarea' },
         posted_by: { label: 'Posted By', type: 'text', resolveId: true, editableOnCreate: false, editableOnUpdate: false },
         posted_at: { label: 'Posted', type: 'text', editableOnCreate: false, editableOnUpdate: false },
-      },
-    },
-    site_admins: {
-      label: 'Site Admins',
-      group: 'Admin Only',
-      minLevel: 20,
-      table: 'site_admins',
-      primaryKey: 'id',
-      displayMode: 'table',
-      columns: {
-        id: { label: 'Profile', type: 'text', editableOnCreate: true, editableOnUpdate: false, resolveId: true },
-        admin_role: { label: 'Role', type: 'select', pill: true, options: ['owner', 'developer', 'moderator'] },
-        granted_at: { label: 'Granted', type: 'text', editableOnCreate: false, editableOnUpdate: false },
       },
     },
 

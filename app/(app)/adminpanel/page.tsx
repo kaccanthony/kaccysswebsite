@@ -11,7 +11,8 @@ export default async function AdminPanelPage() {
   if (user.effectivePermLevel < 20) redirect('/dashboard');
 
   const allGroups = visibleGroupsFor(user.effectivePermLevel);
-  const adminGroups = {
+    const adminGroups = {
+    Announcements: allGroups['Announcements'] ?? [],
     'Admin Only': allGroups['Admin Only'] ?? [],
     Content: allGroups['Content'] ?? [],
   };

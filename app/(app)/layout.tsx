@@ -67,6 +67,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     }
   }
 
+  const [{ data: recipientRows }, { data: readRows }] = await Promise.all([
+  supabase.from('notification_recipients').select('notif_id').eq('profile_id', user.id),
+  supabase.from('notification_reads').select('notif_id').eq('profile_id', user.id),
+  ]);
+  const readSet = new Set((readRows ?? []).map((r) => r.notif_id));
+  const unreadCount = (recipientRows ?? []).filter((r) => !readSet.has(r.notif_id)).length;
+
   return (
       <AppShell
         user={{
@@ -79,6 +86,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         }}
         assignedSessions={assignedSessions}
         viewingAs={user.viewingAs}
+        unreadCount={unreadCount}
       >
       {children}
     </AppShell>

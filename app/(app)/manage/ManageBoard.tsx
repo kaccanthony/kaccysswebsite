@@ -14,17 +14,32 @@ import { GROUP_ORDER, type BoardConfig, type ColumnDef } from '@/lib/manageTable
 import ViewAsPanel from '../adminpanel/ViewAsPanel';
 import type { ViewAsState } from '@/lib/getCurrentUser';
 import './manage.css';
+import { postNotification } from '@/app/actions/postNotification';
+import { searchProfiles, type ProfileSuggestion } from '@/lib/profileSearch';
+import { VIEWABLE_RANKS, labelForRank } from '@/lib/viewAs/rankMap';
 
 const REALTIME_ENABLED = true; // flip off if you'd rather not run a channel per board
 
 type Row = Record<string, any>;
 type Groups = Record<string, [string, BoardConfig][]>;
 
-const NOTIF_CATEGORIES = ['Session', 'Event', 'Website', 'System', 'Manager', 'Admin', 'Update'];
+const NOTIF_CATEGORIES = ['Session', 'Event', 'Feedback', 'Website', 'Manager', 'System', 'Admin', 'Update'];
 const NOTIF_CAT_CLASS: Record<string, string> = {
-  Session: 'cat-session', Event: 'cat-event', Website: 'cat-website',
-  System: 'cat-system', Manager: 'cat-manager', Admin: 'cat-admin', Update: 'cat-update',
+  Session: 'cat-session', Event: 'cat-event', Feedback: 'cat-feedback', Website: 'cat-website',
+  Manager: 'cat-manager', System: 'cat-system', Admin: 'cat-admin', Update: 'cat-update',
 };
+const ADMIN_ONLY_CATEGORIES = ['System', 'Admin', 'Update'];
+
+const DEPARTMENT_OPTIONS = [
+  { key: 'op_dept', label: 'Operations Department' },
+  { key: 'comm_dept', label: 'Community Department' },
+  { key: 'ih_auth', label: 'Internal Helper Department' },
+  { key: 'host_auth', label: 'Head Staff Department' },
+  { key: 'cohost_auth', label: 'Co-Host Authorized Department' },
+  { key: 'asst_auth', label: 'Assistant Authorized Department' },
+  { key: 'event_auth', label: 'Event Authorized Department' },
+  { key: 'developer', label: "Developer's Department" },
+];
 const PILL_PALETTE_SIZE = 6;
 
 function pillClassFor(value: unknown, options?: string[]) {
@@ -519,6 +534,7 @@ export default function ManageBoard({
       {/* ── Notification composer ── */}
       {composerOpen && cfg && (
         <NotificationComposer
+          permLevel={permLevel}
           onCancel={() => setComposerOpen(false)}
           onPosted={() => {
             setComposerOpen(false);
@@ -661,27 +677,62 @@ function Field({ col, def, value, locked, onChange }: { col: string; def: Column
 }
 
 /* ============================= notification composer ============================= */
-function NotificationComposer({ onCancel, onPosted, showToast }: { onCancel: () => void; onPosted: () => void; showToast: (m: string, t?: 'success' | 'error') => void }) {
-  const [category, setCategory] = useState(NOTIF_CATEGORIES[0]);
+function NotificationComposer({
+  permLevel, onCancel, onPosted, showToast,
+}: { permLevel: number; onCancel: () => void; onPosted: () => void; showToast: (m: string, t?: 'success' | 'error') => void }) {
+  const availableCategories = NOTIF_CATEGORIES.filter((c) => permLevel >= 20 || !ADMIN_ONLY_CATEGORIES.includes(c));
+
+  const [category, setCategory] = useState(availableCategories[0]);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [audienceType, setAudienceType] = useState<'everyone' | 'rank' | 'department' | 'users'>('everyone');
+  const [audienceRank, setAudienceRank] = useState(VIEWABLE_RANKS[0]);
+  const [audienceDept, setAudienceDept] = useState(DEPARTMENT_OPTIONS[0].key);
+  const [userQuery, setUserQuery] = useState('');
+  const [userResults, setUserResults] = useState<ProfileSuggestion[]>([]);
+  const [pickedUsers, setPickedUsers] = useState<ProfileSuggestion[]>([]);
+  const [posting, setPosting] = useState(false);
+  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (audienceType !== 'users' || userQuery.trim().length < 2) { setUserResults([]); return; }
+    if (searchDebounce.current) clearTimeout(searchDebounce.current);
+    searchDebounce.current = setTimeout(async () => {
+      try { setUserResults(await searchProfiles(userQuery)); } catch { setUserResults([]); }
+    }, 250);
+    return () => { if (searchDebounce.current) clearTimeout(searchDebounce.current); };
+  }, [userQuery, audienceType]);
+
+  function addUser(p: ProfileSuggestion) {
+    if (!pickedUsers.some((u) => u.id === p.id)) setPickedUsers((list) => [...list, p]);
+    setUserQuery('');
+    setUserResults([]);
+  }
+  function removeUser(id: string) {
+    setPickedUsers((list) => list.filter((u) => u.id !== id));
+  }
 
   const submit = async () => {
     const t = title.trim();
     const d = description.trim();
     if (!t || !d) { showToast('Title and description are both required.', 'error'); return; }
-    if (!confirm(`Post this ${category} announcement to everyone now?`)) return;
+    if (audienceType === 'users' && pickedUsers.length === 0) { showToast('Pick at least one recipient.', 'error'); return; }
+    if (!confirm(`Post this ${category} announcement now?`)) return;
+
+    setPosting(true);
     try {
-      const res = await fetch('/api/manage/records', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ table: 'notifications', data: { category, title: t, description: d } }),
+      await postNotification({
+        category, title: t, description: d, audienceType,
+        audienceRank: audienceType === 'rank' ? audienceRank : undefined,
+        audienceDepartment: audienceType === 'department' ? audienceDept : undefined,
+        userIds: audienceType === 'users' ? pickedUsers.map((u) => u.id) : undefined,
       });
-      const result = await res.json();
-      if (result.success) { showToast('Announcement posted.', 'success'); onPosted(); }
-      else showToast(result.message || 'Failed to post.', 'error');
-    } catch {
-      showToast('Failed to post.', 'error');
+      showToast('Announcement posted.', 'success');
+      onPosted();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Failed to post.', 'error');
+    } finally {
+      setPosting(false);
     }
   };
 
@@ -697,13 +748,72 @@ function NotificationComposer({ onCancel, onPosted, showToast }: { onCancel: () 
             <div>
               <label style={{ display: 'block', marginBottom: 8, fontSize: '.75rem', color: 'rgba(255,255,255,.5)' }}>Category</label>
               <div className="ms-composer-cats">
-                {NOTIF_CATEGORIES.map((c) => (
+                {availableCategories.map((c) => (
                   <button key={c} type="button" className={`ms-notif-pill ${NOTIF_CAT_CLASS[c]} ${category === c ? 'selected' : ''}`} onClick={() => setCategory(c)}>
                     {c}
                   </button>
                 ))}
               </div>
+              {permLevel < 20 && (
+                <div style={{ fontSize: '.68rem', color: 'rgba(255,255,255,.35)', marginTop: 6 }}>
+                  System, Admin, and Update are Admin-only.
+                </div>
+              )}
             </div>
+
+            <div>
+              <label style={{ display: 'block', marginBottom: 8, fontSize: '.75rem', color: 'rgba(255,255,255,.5)' }}>Audience</label>
+              <div className="ms-composer-cats">
+                {(['everyone', 'rank', 'department', 'users'] as const).map((a) => (
+                  <button key={a} type="button" className={`ms-audience-pill ${audienceType === a ? 'selected' : ''}`} onClick={() => setAudienceType(a)}>
+                    {a === 'everyone' ? 'Everyone' : a === 'rank' ? 'By Rank' : a === 'department' ? 'By Department' : 'Specific Users'}
+                  </button>
+                ))}
+              </div>
+
+              {audienceType === 'rank' && (
+                <select value={audienceRank} onChange={(e) => setAudienceRank(e.target.value)} style={{ marginTop: 10, width: '100%' }}>
+                  {VIEWABLE_RANKS.map((r) => <option key={r} value={r}>{labelForRank(r)}</option>)}
+                </select>
+              )}
+
+              {audienceType === 'department' && (
+                <select value={audienceDept} onChange={(e) => setAudienceDept(e.target.value)} style={{ marginTop: 10, width: '100%' }}>
+                  {DEPARTMENT_OPTIONS.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+                </select>
+              )}
+
+              {audienceType === 'users' && (
+                <div style={{ marginTop: 10 }}>
+                  <input
+                    type="text"
+                    placeholder="Search by Discord or Roblox username…"
+                    value={userQuery}
+                    onChange={(e) => setUserQuery(e.target.value)}
+                  />
+                  {userResults.length > 0 && (
+                    <div className="ap-search-results">
+                      {userResults.map((r) => (
+                        <button type="button" key={r.id} className="ap-search-result" onClick={() => addUser(r)}>
+                          <span>{r.discordUsername}</span>
+                          {r.robloxUsername && <span className="ap-search-result-meta">{r.robloxUsername}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {pickedUsers.length > 0 && (
+                    <div className="ms-composer-cats" style={{ marginTop: 8 }}>
+                      {pickedUsers.map((u) => (
+                        <span key={u.id} className="ms-notif-pill cat-website" style={{ cursor: 'pointer' }} onClick={() => removeUser(u.id)}>
+                          {u.discordUsername} ✕
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div>
               <label style={{ display: 'block', marginBottom: 8, fontSize: '.75rem', color: 'rgba(255,255,255,.5)' }}>Title</label>
               <input type="text" maxLength={100} placeholder="Short, punchy title…" value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -725,7 +835,7 @@ function NotificationComposer({ onCancel, onPosted, showToast }: { onCancel: () 
         </div>
         <div className="ms-modal-footer">
           <button className="mbtn" onClick={onCancel}>Cancel</button>
-          <button className="mbtn primary" onClick={submit}>Save</button>
+          <button className="mbtn primary" disabled={posting} onClick={submit}>Save</button>
         </div>
       </div>
     </div>

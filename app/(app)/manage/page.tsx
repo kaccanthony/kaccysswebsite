@@ -8,8 +8,8 @@ export default async function ManagePage() {
   const user = await getCurrentUser();
   if (user.permLevel < 15) redirect('/dashboard');
 
-  const groups = visibleGroupsFor(user.permLevel);
-  // Admin Only + Content now live exclusively on /adminpanel.
+  const groups = visibleGroupsFor(user.effectivePermLevel);
+  // Admin Only + Content stay exclusive to /adminpanel — Announcements is now shared.
   delete groups['Admin Only'];
   delete groups['Content'];
 
