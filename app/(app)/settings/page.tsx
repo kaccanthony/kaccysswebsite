@@ -33,6 +33,7 @@ export default async function SettingsPage({
           already renders .bg-app, wraps {children} in <main className="main">,
           and renders the real header using its own user data. All three were
           leftover duplicate work from before AppShell took over the shell. */}
+    <div className="settings-page">
       <div className="page-header">
         <div>
           <div className="section-label">Account Settings</div>
@@ -84,6 +85,7 @@ export default async function SettingsPage({
           />
         }
       />
+    </div>
     </>
   );
 }

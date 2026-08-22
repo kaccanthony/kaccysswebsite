@@ -77,10 +77,17 @@ export async function GET(request: Request) {
       // (guilds.members.read) — no bot required. No-ops safely if
       // DISCORD_GUILD_ID isn't set yet, or the API call fails for any reason.
       await syncDiscordRoles(supabase, data.session?.provider_token, data.user.id);
+      // Fully onboarded accounts (Roblox already linked) honor `next` — e.g. the Settings
+      // "Sync Discord Info" button. Anyone still mid-onboarding always goes through /login,
+// since that page is what routes them to whichever step (Roblox linking, etc.) is left.
+      const { data: profileRow } = await supabase
+        .from('profiles')
+        .select('roblox_username')
+        .eq('id', data.user.id)
+        .maybeSingle();
+      const alreadyOnboarded = !!profileRow?.roblox_username;
 
-      // Back to /login — it checks Roblox status itself and shows the
-      // right step (or redirects to /dashboard if both are already done).
-      return NextResponse.redirect(`${origin}/login`);
+      return NextResponse.redirect(`${origin}${alreadyOnboarded ? next : '/login'}`);
     }
   }
 

@@ -1,8 +1,8 @@
 /* FILE: app/settings/settings.css */
 /* ── Main ── */
-.main { position: relative; z-index: 1; max-width: 860px; margin: 0 auto; padding: 88px 24px 60px; }
+.settings-page { position: relative; z-index: 1; max-width: 860px; margin: 0 auto; padding: 0px 24px 60px; }
 
-.page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; gap: 16px; flex-wrap: wrap; }
+.page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .section-label { font-family: 'Libre Baskerville', serif; font-size: 1.4rem; font-weight: 600; color: #fff; letter-spacing: .01em; }
 .section-sub { font-size: .82rem; color: rgba(255,255,255,.40); margin-top: 4px; }
 .toast-wrap { display: flex; flex-direction: column; gap: 8px; }

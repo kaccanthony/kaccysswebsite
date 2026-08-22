@@ -5,10 +5,10 @@
 //
 // Avatar upload and password-change were dropped per your OAuth setup —
 // the avatar shown here is read-only, sourced straight from Discord/Roblox.
-
+import { createClient } from '@/utils/supabase/client';
 import { useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faIdCard, faSignature, faGamepad, faFingerprint, faEyeSlash } from '@fortawesome/free-solid-svg-icons';
+import { faIdCard, faSignature, faGamepad, faFingerprint, faEyeSlash, faRotate } from '@fortawesome/free-solid-svg-icons';
 import { faDiscord as faDiscordBrand } from '@fortawesome/free-brands-svg-icons';
 import { saveProfile } from './actions';
 
@@ -36,6 +36,17 @@ export default function ProfileForm({
   const formRef = useRef<HTMLFormElement>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const isStaff = variant === 'staff';
+
+    async function handleSyncDiscord() {
+    const supabase = createClient();
+    await supabase.auth.signInWithOAuth({
+      provider: 'discord',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=/settings`,
+        scopes: 'identify guilds.members.read', // must match LoginForm.tsx's scopes exactly
+      },
+    });
+  }
 
   return (
     <>
@@ -135,24 +146,23 @@ export default function ProfileForm({
           <div className="notif-card" style={{ marginTop: 16 }}>
             <div className="notif-card-left">
               <div className="notif-icon-wrap purple">
-                <FontAwesomeIcon icon={faEyeSlash} />
+                <FontAwesomeIcon icon={faRotate} />
               </div>
               <div className="notif-info">
-                <div className="notif-title">{isStaff ? 'Hide Stats & History' : 'Hide Trainee Stats & History'}</div>
+                <div className="notif-title">Re-sync Account Info</div>
                 <div className="notif-desc">
-                  {isStaff
-                    ? "Other staff members won't see your session attendance and history."
-                    : "Your training session history won't be visible to others."}
+                  Discord username/avatar/role and Roblox username only update when you sign in
+                  — pull the latest now instead of waiting for your next login.
                 </div>
               </div>
             </div>
-            <div className="notif-card-right">
-              <label className="toggle-wrap">
-                <input type="checkbox" name="hide_stats" defaultChecked={hideStats} />
-                <span className="toggle-track">
-                  <span className="toggle-thumb" />
-                </span>
-              </label>
+            <div className="notif-card-right" style={{ display: 'flex', gap: 8 }}>
+              <button type="button" className="btn-ghost" onClick={handleSyncDiscord}>
+                Sync Discord
+              </button>
+              <a className="btn-ghost" href="/auth/roblox?next=/settings" style={{ textDecoration: 'none' }}>
+                Sync Roblox
+              </a>
             </div>
           </div>
 

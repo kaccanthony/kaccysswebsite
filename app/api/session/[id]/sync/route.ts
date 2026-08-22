@@ -12,6 +12,11 @@ const CORE_COLUMNS = new Set([
   'session_status', 'host', 'co_host1', 'co_host2', 'co_host3', 'co_host4/supervisor',
   'assistant_1', 'assistant_2', 'assistant_3', 'assistant_4',
   'staff_attendance', 'trainee_attendance', 'additional_notes',
+  // session_date / session_time / trainee_timer are real session_ongoing columns
+  // (see db.txt) that the Session Details panel edits — previously missing here,
+  // which meant those edits were silently accepted client-side but never
+  // actually written to the database.
+  'session_date', 'session_time', 'trainee_timer',
   ...Array.from({ length: 10 }, (_, i) => i + 1).flatMap((t) => [
     `trainee_${t}_name`, `trainee_${t}_discord`, `trainee_${t}_discord_id`,
     `trainee_${t}_zone`, `trainee_${t}_note`, `trainee_${t}_trainer_name`,
