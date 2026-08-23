@@ -16,13 +16,17 @@ export default async function DashboardPage() {
   const supabase = await createClient();
 
   // ── Is this person currently running a live session? (for the "my_session" card) ──
+  // Uses effectiveUsername, not user.username — a 'person' mode View As session needs
+  // this to check the IMPERSONATED person's live sessions, same fix as /setup and
+  // sessionongoing. 'rank' mode has no personLabel, so this still falls back to the
+  // real username exactly as before.
   let myLiveSessionId: number | null = null;
-  if (user.username) {
+  if (user.effectiveUsername) {
     const { data: liveSession } = await supabase
       .from('session_ongoing')
       .select('session_id')
       .or(
-        `host.eq.${user.username},co_host1.eq.${user.username},co_host2.eq.${user.username},co_host3.eq.${user.username},co_host4_supervisor.eq.${user.username},assistant_1.eq.${user.username},assistant_2.eq.${user.username},assistant_3.eq.${user.username},assistant_4.eq.${user.username}`
+        `host.eq.${user.effectiveUsername},co_host1.eq.${user.effectiveUsername},co_host2.eq.${user.effectiveUsername},co_host3.eq.${user.effectiveUsername},co_host4_supervisor.eq.${user.effectiveUsername},assistant_1.eq.${user.effectiveUsername},assistant_2.eq.${user.effectiveUsername},assistant_3.eq.${user.effectiveUsername},assistant_4.eq.${user.effectiveUsername}`
       )
       .maybeSingle();
 
@@ -38,7 +42,7 @@ export default async function DashboardPage() {
   return (
     <>
       <h1 className="section-label">Dashboard</h1>
-      <p className="section-sub">Welcome back, {user.username}.</p>
+      <p className="section-sub">Welcome back, {user.effectiveUsername}.</p>
 
       <div className="bento-grid">
         {cards.length === 0 ? (
