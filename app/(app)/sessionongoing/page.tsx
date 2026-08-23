@@ -100,10 +100,11 @@ export default async function SessionOngoingPage({
     }
   }
 
+  const norm = (s: string | null | undefined) => (s ?? '').trim().toLowerCase();
   let viewerRole: ViewerRole = 'Assistant';
   if (myDisplayName) {
-    if (hostName === myDisplayName) viewerRole = 'Host';
-    else if (cohostNames.includes(myDisplayName)) viewerRole = 'Co-Host';
+    if (norm(hostName) === norm(myDisplayName)) viewerRole = 'Host';
+    else if (cohostNames.some((c) => norm(c) === norm(myDisplayName))) viewerRole = 'Co-Host';
   }
   myDisplayName ??= user.effectiveUsername;
 
