@@ -4,15 +4,12 @@
 // sessionongoing.module.css applies unchanged — only the data layer moved from
 // polling sync_session.php to Supabase Realtime + the /api/session/[id]/* routes.
 //
-// PARITY NOTE: the trainee table, overrides, status/conclude flow, drivers,
-// staff, bell widget, announcements, time tracker, feedback modal, and station
-// generator are fully ported below. Three DOM-heavy widgets from the original —
-// Document Picture-in-Picture pop-outs, the draggable floating notes panel, and
-// resizable/hideable table columns — are stubbed with the same trigger points
-// wired up (see the `// TODO(port): ...` markers) so nothing is silently missing;
-// they follow the exact same pattern as openFeedbackModal below, just targeting
-// a `documentPictureInPicture` window instead of a modal. See README for the
-// priority order to finish them in.
+// PARITY NOTE: the trainee table (including resizable/hideable columns),
+// overrides, status/conclude flow, drivers, staff, bell widget, announcements,
+// time tracker, feedback modal, station generator, and Document
+// Picture-in-Picture pop-outs are fully ported below. One DOM-heavy widget
+// from the original — the draggable floating notes panel — is still stubbed
+// (see the `// TODO(port): ...` marker).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -49,6 +46,34 @@ function computeCurrentRemaining(t: TimerState): number {
   return Math.max(0, t.remainingSeconds - elapsed);
 }
 function newUid() { return 'u_' + Math.random().toString(36).slice(2) + Date.now(); }
+
+// Ported from makeColumnsResizable() in the original. Mutates th.style.width
+// directly during drag rather than going through React state — same reasoning
+// as the original: a re-render per pixel of mouse movement would be wasteful,
+// and nothing else in the app needs to know the column's exact width live.
+function handleColResizeMouseDown(e: React.MouseEvent<HTMLSpanElement>) {
+  e.preventDefault();
+  const handle = e.currentTarget;
+  const th = handle.closest('th') as HTMLElement | null;
+  if (!th) return;
+  const startX = e.pageX;
+  const startWidth = th.offsetWidth;
+  handle.classList.add(styles.resizing);
+  function onMove(ev: MouseEvent) {
+    th!.style.width = Math.max(50, startWidth + (ev.pageX - startX)) + 'px';
+  }
+  function onUp() {
+    handle.classList.remove(styles.resizing);
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function ColResizeHandle() {
+  return <span className={styles.colResizer} onMouseDown={handleColResizeMouseDown} />;
+}
 
 // Ported from renderScriptPreview() / escapeForPreview() in the original.
 // `win` matters here: when this renders inside the Document PiP pop-out, the
@@ -195,6 +220,11 @@ export default function SessionOngoingClient(props: Props) {
   }, []);
   const [elapsed, setElapsed] = useState(0);
   const [lastSyncedAt, setLastSyncedAt] = useState(Date.now());
+  const [syncNoteTick, setSyncNoteTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setSyncNoteTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const dirtyRef = useRef({ live: false, staffCore: false, overrides: false, status: false, details: false, attendance: false, traineeRows: new Set<string>() });
   const traineeCountRef = useRef(initialSession.num_slots || 10);
@@ -262,6 +292,9 @@ export default function SessionOngoingClient(props: Props) {
   // ── realtime wiring — replaces setInterval(pushState/pullState, 5000) ──
   useSessionRealtime(sessionId, (row) => {
     setSession(row);
+    if (!dirtyRef.current.status) {
+      setStatusValue((row.session_status || 'inprogress').toLowerCase().replace(/\s+/g, ''));
+    }
     setTraineeDetails((prev) => {
       const next = { ...prev };
       for (const r of allocatedRows) {
@@ -968,14 +1001,16 @@ Thank you for attending.`;
                       statusValue === 'inprogress' ? styles.statusInprogress
                         : statusValue === 'paused' ? styles.statusPaused
                         : statusValue === 'cancelled' ? styles.statusCancelled
-                        : styles.statusConcluded
+                        : statusValue === 'concluded' ? styles.statusConcluded
+                        : ''
                     }`}
                   >
                     <span className={styles.statusDot} />
                     {statusValue === 'inprogress' ? 'In Progress'
                       : statusValue === 'paused' ? 'Paused'
                       : statusValue === 'cancelled' ? 'Cancelled'
-                      : 'Concluded'}
+                      : statusValue === 'concluded' ? 'Concluded'
+                      : session.session_status || statusValue}
                   </span>
                 </div>
               </div>
@@ -1071,10 +1106,15 @@ Thank you for attending.`;
             </div>
           </div>
           <div className={styles.tableWrap}>
-            <table>
+            <table className={styles.resizableCols}>
               <thead>
                 <tr>
-                  {TRAINEE_COLUMNS.map((col) => !hiddenCols.has(col.n) && <th key={col.n}>{col.label}</th>)}
+                  {TRAINEE_COLUMNS.map((col) => !hiddenCols.has(col.n) && (
+                    <th key={col.n}>
+                      {col.label}
+                      <ColResizeHandle />
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -1160,10 +1200,10 @@ Thank you for attending.`;
                       )}
                       {!hiddenCols.has(7) && (
                         <td className={styles.timerCell}>
-                          <span className={`${styles.timerDisplay} ${t.running ? styles.running : live <= 60 ? styles.low : ''}`}>{fmt(live)}</span>
+                          <span className={`${styles.timerDisplay} ${t.running && live > 60 ? styles.running : live <= 0 ? styles.expired : live <= 60 ? styles.low : ''}`}>{fmt(live)}</span>
                           {!isAssistant && (
                             <>
-                              <button className={styles.timerBtn} onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t.running ? ICONS.pause : ICONS.play} /></button>
+                              <button className={`${styles.timerBtn} ${t.running ? styles.active : ''}`} onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t.running ? ICONS.pause : ICONS.play} /></button>
                               <button className={styles.timerBtn} onClick={() => resetTimer(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.redo} /></button>
                               <button className={styles.timerBtn} onClick={() => recordSetupDone(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.check} /></button>
                             </>
@@ -1335,8 +1375,8 @@ Thank you for attending.`;
         <div className={styles.twoCol}>
           <section className={styles.panel}>
             <div className={styles.panelTitle}>Drivers</div>
-            <table className={styles.driversTable}>
-              <thead><tr><th>Discord</th><th>Roblox</th><th>Attendance</th><th /></tr></thead>
+            <table className={`${styles.driversTable} ${styles.resizableCols}`}>
+              <thead><tr><th>Discord<ColResizeHandle /></th><th>Roblox<ColResizeHandle /></th><th>Attendance<ColResizeHandle /></th><th /></tr></thead>
               <tbody>
                 {drivers.map((d, i) => (
                   <tr key={i}>
@@ -1362,8 +1402,8 @@ Thank you for attending.`;
 
           <section className={styles.panel}>
             <div className={styles.panelTitle}>Staff</div>
-            <table className={styles.staffTable}>
-              <thead><tr><th>Role in Shift</th><th>Discord</th><th>Attendance</th><th>Notes</th><th /></tr></thead>
+            <table className={`${styles.staffTable} ${styles.resizableCols}`}>
+              <thead><tr><th>Role in Shift<ColResizeHandle /></th><th>Discord<ColResizeHandle /></th><th>Attendance<ColResizeHandle /></th><th>Notes<ColResizeHandle /></th><th /></tr></thead>
               <tbody>
                 {staffShift.map((s, i) => (
                   <tr key={i}>
@@ -1705,8 +1745,8 @@ Thank you for attending.`;
                 {/* mirrors the trainee row's timer — no need to close the modal */}
                 <div className={styles.modalTimerBox}>
                   <span className={styles.modalTimerLabel}>Trainee Timer</span>
-                  <span className={`${styles.timerDisplay} ${t?.running ? styles.running : live <= 60 ? styles.low : ''}`}>{fmt(live)}</span>
-                  <button className={styles.timerBtn} title="Start/pause" onClick={() => toggleTimer(row)}>
+                  <span className={`${styles.timerDisplay} ${t?.running && live > 60 ? styles.running : live <= 0 ? styles.expired : live <= 60 ? styles.low : ''}`}>{fmt(live)}</span>
+                  <button className={`${styles.timerBtn} ${t?.running ? styles.active : ''}`} title="Start/pause" onClick={() => toggleTimer(row)}>
                     <FontAwesomeIcon icon={t?.running ? ICONS.pause : ICONS.play} />
                   </button>
                   <button className={styles.timerBtn} title="Reset" onClick={() => resetTimer(row, totalSeconds)}>
@@ -1795,8 +1835,8 @@ Thank you for attending.`;
 
               {t && (
                 <div className={styles.timerCell} style={{ marginTop: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-                  <span className={`${styles.timerDisplay} ${t.running ? styles.running : live <= 60 ? styles.low : ''}`}>{fmt(live)}</span>
-                  <button className={styles.timerBtn} onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t.running ? ICONS.pause : ICONS.play} /></button>
+                  <span className={`${styles.timerDisplay} ${t.running && live > 60 ? styles.running : live <= 0 ? styles.expired : live <= 60 ? styles.low : ''}`}>{fmt(live)}</span>
+                  <button className={`${styles.timerBtn} ${t.running ? styles.active : ''}`} onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t.running ? ICONS.pause : ICONS.play} /></button>
                   <button className={styles.timerBtn} onClick={() => resetTimer(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.redo} /></button>
                   <button className={styles.timerBtn} onClick={() => recordSetupDone(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.check} /></button>
                 </div>
@@ -1925,11 +1965,11 @@ Thank you for attending.`;
             <div style={{ padding: 16, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
               <div style={{ fontSize: '.8rem', color: 'rgba(255,255,255,.32)' }}>{detail.discord || `Trainee ${parseInt(row, 10) + 1}`}</div>
               {t && (
-                <span className={`${styles.timerDisplay} ${t.running ? styles.running : live <= 60 ? styles.low : ''}`} style={{ fontSize: '2rem' }}>{fmt(live)}</span>
+                <span className={`${styles.timerDisplay} ${t.running && live > 60 ? styles.running : live <= 0 ? styles.expired : live <= 60 ? styles.low : ''}`} style={{ fontSize: '2rem' }}>{fmt(live)}</span>
               )}
               {canControl ? (
                 <div className={styles.timerCell} style={{ justifyContent: 'center' }}>
-                  <button className={styles.timerBtn} onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t?.running ? ICONS.pause : ICONS.play} /></button>
+                  <button className={`${styles.timerBtn} ${t?.running ? styles.active : ''}`} onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t?.running ? ICONS.pause : ICONS.play} /></button>
                   <button className={styles.timerBtn} onClick={() => resetTimer(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.redo} /></button>
                   <button
                     className={styles.timerBtn}

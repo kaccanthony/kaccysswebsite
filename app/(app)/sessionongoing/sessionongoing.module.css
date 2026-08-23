@@ -88,14 +88,21 @@
 .colPickerMenu.open { display: block; }
 .colPickerRow { display: flex; align-items: center; gap: 8px; padding: 4px 2px; font-size: .76rem; color: rgba(255,255,255,.8); cursor: pointer; }
 .tableWrap table { width: 100%; border-collapse: collapse; font-size: .80rem; min-width: 1200px; }
+.resizableCols { table-layout: fixed; }
+.colResizer { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; user-select: none; }
+.colResizer:hover, .colResizer.resizing { background: rgba(124,196,255,.35); }
 .tableWrap thead th, .driversTable thead th, .staffTable thead th { position: sticky; top: 0; background: #141414; color: rgba(255,255,255,.55); font-size: .65rem; text-transform: uppercase; padding: 10px; border-bottom: 1px solid rgba(255,255,255,.18); border-right: 1px solid rgba(255,255,255,.10); white-space: nowrap; }
 .tableWrap tbody td, .driversTable tbody td, .staffTable tbody td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.10); border-right: 1px solid rgba(255,255,255,.10); color: rgba(255,255,255,.85); }
 
 .timerCell { display: flex; align-items: center; justify-content: center; gap: 6px; }
-.timerDisplay { font-family: 'JetBrains Mono', monospace; font-size: .82rem; min-width: 42px; color: rgba(255,255,255,.55); }
+.timerDisplay { font-family: 'JetBrains Mono', monospace; font-size: .82rem; font-variant-numeric: tabular-nums; min-width: 42px; color: rgba(255,255,255,.55); }
 .timerDisplay.running { color: #4ade80; }
 .timerDisplay.low { color: #f5a524; }
+.timerDisplay.expired { color: #ff6b6b; animation: timerBlink 1s step-start infinite; }
+@keyframes timerBlink { 50% { opacity: .35; } }
 .timerBtn { width: 24px; height: 24px; border-radius: 7px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.05); color: rgba(255,255,255,.7); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: .65rem; }
+.timerBtn:hover { background: rgba(255,255,255,.12); color: #fff; }
+.timerBtn.active { background: rgba(74,222,128,.15); border-color: rgba(74,222,128,.4); color: #4ade80; }
 
 .chk { width: 22px; height: 22px; border-radius: 6px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.05); cursor: pointer; }
 
