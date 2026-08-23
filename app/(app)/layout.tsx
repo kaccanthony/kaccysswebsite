@@ -16,56 +16,56 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const roleLabel = getRoleLabel(roleInfo);
 
   // ── Assigned upcoming sessions (host / co-host / assistant / additional) ──
-  // effectiveUsername, not user.username — same View As identity fix as
-  // /setup, sessionongoing, and the dashboard's my_session card.
+  // session_upcoming has no host/co_host*/assistant* columns anymore — staff
+  // assignment is session_staff only (role/staff_name rows). Look up this
+  // person's session_staff rows first, then fetch the matching upcoming
+  // sessions, deriving the role label straight from session_staff.role
+  // instead of which column matched.
   const assignedSessions: AssignedSession[] = [];
   const myDisplayName = user.effectiveUsername;
+
+  const ROLE_LABELS: Record<string, string> = {
+    HOST: 'Host', CH_1: 'CH 1', CH_2: 'CH 2', CH_3: 'CH 3', CH_4: 'CH 4 / SV',
+    AST_1: 'AST 1', AST_2: 'AST 2', AST_3: 'AST 3', AST_4: 'AST 4',
+  };
+  function labelForStaffRole(role: string): string {
+    const base = role.split(',')[0].trim(); // strip ", IH" suffix before lookup
+    return ROLE_LABELS[base] ?? 'Additional Staff';
+  }
 
   if (myDisplayName) {
     const nowBST = new Date();
     const todayBST = nowBST.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
     const nowTimeBST = nowBST.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour12: false });
 
-    const orClause = [
-      `host.eq.${myDisplayName}`,
-      `co_host1.eq.${myDisplayName}`,
-      `co_host2.eq.${myDisplayName}`,
-      `co_host3.eq.${myDisplayName}`,
-      `co_host4_supervisor.eq.${myDisplayName}`,
-      `assistant_1.eq.${myDisplayName}`,
-      `assistant_2.eq.${myDisplayName}`,
-      `assistant_3.eq.${myDisplayName}`,
-      `assistant_4.eq.${myDisplayName}`,
-      `additional_staff.ilike.%${myDisplayName}%`,
-    ].join(',');
+    const { data: staffRows, error: staffErr } = await supabase
+      .from('session_staff')
+      .select('session_id, role')
+      .eq('staff_name', myDisplayName);
 
-    const { data: sessions } = await supabase
-      .from('session_upcoming')
-      .select(`session_id, session_date, session_time, ${STAFF_COLUMNS}`)
-      .in('session_status', ['Booked', 'Scheduled'])
-      .eq('session_booked', true)
-      .or(`session_date.gt.${todayBST},and(session_date.eq.${todayBST},session_time.gte.${nowTimeBST})`)
-      .or(orClause)
-      .order('session_date', { ascending: true })
-      .order('session_time', { ascending: true })
-      .limit(8);
+    if (staffErr) {
+      console.error('session_staff lookup failed:', staffErr.message);
+    } else if (staffRows && staffRows.length > 0) {
+      const roleBySession = new Map(staffRows.map((r) => [r.session_id, r.role]));
+      const sessionIds = staffRows.map((r) => r.session_id);
 
-    for (const row of sessions ?? []) {
-      let sessionRoleLabel = 'Additional Staff';
-      if (row.host === myDisplayName) sessionRoleLabel = 'Host';
-      else if (row.co_host1 === myDisplayName) sessionRoleLabel = 'CH 1';
-      else if (row.co_host2 === myDisplayName) sessionRoleLabel = 'CH 2';
-      else if (row.co_host3 === myDisplayName) sessionRoleLabel = 'CH 3';
-      else if (row.co_host4_supervisor === myDisplayName) sessionRoleLabel = 'CH 4 / SV';
-      else if (row.assistant_1 === myDisplayName) sessionRoleLabel = 'AST 1';
-      else if (row.assistant_2 === myDisplayName) sessionRoleLabel = 'AST 2';
-      else if (row.assistant_3 === myDisplayName) sessionRoleLabel = 'AST 3';
-      else if (row.assistant_4 === myDisplayName) sessionRoleLabel = 'AST 4';
+      const { data: sessions } = await supabase
+        .from('session_upcoming')
+        .select('session_id, session_date, session_time')
+        .in('session_id', sessionIds)
+        .in('session_status', ['Booked', 'Scheduled'])
+        .eq('session_booked', true)
+        .or(`session_date.gt.${todayBST},and(session_date.eq.${todayBST},session_time.gte.${nowTimeBST})`)
+        .order('session_date', { ascending: true })
+        .order('session_time', { ascending: true })
+        .limit(8);
 
-      const dt = new Date(`${row.session_date}T${row.session_time}`);
-      const label = `${dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'Europe/London' })}, ${dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' })} BST — ${sessionRoleLabel}`;
-
-      assignedSessions.push({ sessionId: row.session_id, label });
+      for (const row of sessions ?? []) {
+        const role = roleBySession.get(row.session_id) ?? '';
+        const dt = new Date(`${row.session_date}T${row.session_time}`);
+        const label = `${dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'Europe/London' })}, ${dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' })} BST — ${labelForStaffRole(role)}`;
+        assignedSessions.push({ sessionId: row.session_id, label });
+      }
     }
   }
 
@@ -75,6 +75,28 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   ]);
   const readSet = new Set((readRows ?? []).map((r) => r.notif_id));
   const unreadCount = (recipientRows ?? []).filter((r) => !readSet.has(r.notif_id)).length;
+
+  // ── Does this person have a live session right now? (drives the topbar pill) ──
+  // Same session_staff -> session_ongoing check as dashboard/page.tsx's my_session
+  // card — kept here too (rather than passed down some other way) since layout.tsx
+  // wraps EVERY page, and the pill needs to be correct on all of them, not just
+  // wherever the dashboard's own query happens to run.
+  let hasLiveSession = false;
+  if (myDisplayName) {
+    const { data: staffForLive } = await supabase
+      .from('session_staff')
+      .select('session_id')
+      .eq('staff_name', myDisplayName);
+
+    if (staffForLive && staffForLive.length > 0) {
+      const { data: liveMatch } = await supabase
+        .from('session_ongoing')
+        .select('session_id')
+        .in('session_id', staffForLive.map((r) => r.session_id))
+        .maybeSingle();
+      hasLiveSession = !!liveMatch;
+    }
+  }
 
   return (
       <AppShell
@@ -89,6 +111,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         assignedSessions={assignedSessions}
         viewingAs={user.viewingAs}
         unreadCount={unreadCount}
+        hasLiveSession={hasLiveSession}
       >
       {children}
     </AppShell>

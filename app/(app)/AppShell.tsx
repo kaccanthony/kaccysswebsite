@@ -36,13 +36,17 @@ interface AppShellProps {
   unreadCount: number;
   /** Real identity is never touched by this — it just drives the centered "Viewing as X" pill. */
   viewingAs?: ViewAsState | null;
+  /** Server-computed: does the viewer have a live session right now? Seeds the topbar
+   * pill so it's correct on every page load, not just after /active's own poller runs. */
+  hasLiveSession?: boolean;
   children: React.ReactNode;
 }
 
 export default function AppShell(props: AppShellProps) {
+  const { hasLiveSession = false, ...rest } = props;
   return (
-    <LiveSessionProvider>
-      <AppShellInner {...props} />
+    <LiveSessionProvider initialStatus={{ active: hasLiveSession, lastChangeAt: Date.now() }}>
+      <AppShellInner {...rest} />
     </LiveSessionProvider>
   );
 }
@@ -58,8 +62,6 @@ function AppShellInner({ user, assignedSessions, unreadCount, viewingAs = null, 
   const hoverHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverRevealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const router = useRouter();
-  const pathname = usePathname();
-  const isActiveRoute = pathname === '/active';
   const roleColor = getRoleColor(user.rawRole, user.isAdmin, user.adminRole);
 
   useEffect(() => {
@@ -170,7 +172,9 @@ function AppShellInner({ user, assignedSessions, unreadCount, viewingAs = null, 
         )}
 
         <div className="topbar-right">
-          {isActiveRoute && <LiveStatusPill />}
+          {/* No longer gated to isActiveRoute — status is now seeded server-side (see
+              layout.tsx's hasLiveSession), so it's correct on every page, not just /active. */}
+          <LiveStatusPill />
           <Link href="/notifications" className="bell-btn" aria-label="Notifications">
 
             <FontAwesomeIcon icon={ICONS.bell} />

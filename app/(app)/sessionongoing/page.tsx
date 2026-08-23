@@ -56,35 +56,78 @@ export default async function SessionOngoingPage({
 
   const { data: staffDirectoryRows } = await supabase
     .from('staff_profiles')
-    .select('id, staff_rank, profiles!inner(discord_username)');
+    .select('id, staff_rank, profiles!inner(discord_username, discord_id)');
 
   // session_ongoing has NO host/co_host1-4/assistant_1-4 columns — those live
   // as rows in session_staff (role + staff_name), see db.txt. Pull this
   // session's assignments from there instead of the old flat-column read.
+  //
+  // IMPORTANT: role codes are 'HOST' / 'CH_1'-'CH_4' / 'AST_1'-'AST_4', optionally
+  // suffixed ", IH" (see managesession/actions.ts PRIMARY_ROLES) — NOT the human
+  // labels 'Host'/'Co-Host'/'Assistant'. Matching against those human labels (the
+  // previous version of this query) always returned zero rows, which is why the
+  // host dropdown showed None and why every viewer fell through to the default
+  // 'Assistant' role regardless of who they actually were on the session.
   const { data: staffRows } = await supabase
     .from('session_staff')
     .select('role, staff_name')
     .eq('session_id', sessionId);
 
-  const hostName = staffRows?.find((s) => s.role === 'Host')?.staff_name ?? null;
-  const cohostNames = (staffRows ?? []).filter((s) => s.role === 'Co-Host').map((s) => s.staff_name);
-  const assistantNames = (staffRows ?? []).filter((s) => s.role === 'Assistant').map((s) => s.staff_name);
+  function findRole(code: string): string | null {
+    return (staffRows ?? []).find((r) => r.role === code || r.role.startsWith(`${code},`))?.staff_name ?? null;
+  }
 
-  // staff_id in the old MySQL schema is now the Supabase auth uid (see profiles.id
-  // in db.txt) — build the same "display name -> id" directory the PHP version did.
-  const staffDirectory: Record<string, string> = {};
+  const hostName = findRole('HOST');
+  const cohostNames = ['CH_1', 'CH_2', 'CH_3', 'CH_4'].map(findRole).filter((n): n is string => !!n);
+  const assistantNames = ['AST_1', 'AST_2', 'AST_3', 'AST_4'].map(findRole).filter((n): n is string => !!n);
+
+  // staffDirectory maps discord_username -> real Discord snowflake ID — NOT the
+  // Supabase auth uuid (row.id). The "Discord ID" field next to Session Host/
+  // Trainer needs their actual Discord ID; using the internal auth id there was
+  // wrong regardless of the roster issue below.
+  const HOST_ELIGIBLE_RANKS = ['Operations Manager', 'Community Manager', 'Head Staff', 'Host Authorized'];
   const cohostEligibleRanks = ['Community Manager', 'Operations Manager', 'Head Staff', 'Co-Host Authorized'];
   const assistantEligibleRanks = [...cohostEligibleRanks, 'Assistant Authorized'];
+
+  const staffDirectory: Record<string, string> = {};
+  const eligibleHost = new Set<string>();
   const eligibleCohost = new Set<string>();
   const eligibleAssistant = new Set<string>();
 
   for (const row of staffDirectoryRows ?? []) {
-    const name = (row as any).profiles?.discord_username ?? '';
+    const p = (row as any).profiles;
+    const name = p?.discord_username ?? '';
     if (!name) continue;
-    staffDirectory[name] = row.id;
+    staffDirectory[name] = p?.discord_id ?? '';
+    if (HOST_ELIGIBLE_RANKS.includes(row.staff_rank)) eligibleHost.add(name);
     if (cohostEligibleRanks.includes(row.staff_rank)) eligibleCohost.add(name);
     if (assistantEligibleRanks.includes(row.staff_rank)) eligibleAssistant.add(name);
   }
+
+  // staff_profiles only covers people who've actually logged in at least once.
+  // Anyone pre-registered but not yet claimed lives in staff_roster instead — same
+  // fallback pattern managesession/page.tsx and setup/page.tsx already use. Unlike
+  // the previous version of this fix, roster rows ARE added to staffDirectory now
+  // too (roster already has a real discord_id, no auth uid required for that) —
+  // otherwise a not-yet-logged-in host/trainer would show a correct name but a
+  // permanently blank Discord ID field, and would never appear in the host
+  // dropdown's option list at all.
+  const { data: rosterRows } = await supabase
+    .from('staff_roster')
+    .select('discord_id, discord_username, staff_rank')
+    .eq('claimed', false);
+
+  for (const row of rosterRows ?? []) {
+    if (!staffDirectory[row.discord_username]) staffDirectory[row.discord_username] = row.discord_id ?? '';
+    if (HOST_ELIGIBLE_RANKS.includes(row.staff_rank)) eligibleHost.add(row.discord_username);
+    if (cohostEligibleRanks.includes(row.staff_rank)) eligibleCohost.add(row.discord_username);
+    if (assistantEligibleRanks.includes(row.staff_rank)) eligibleAssistant.add(row.discord_username);
+  }
+
+  // Whoever is CURRENTLY assigned always appears in their own dropdown, even if
+  // their rank wouldn't normally qualify them going forward — same defensive
+  // pattern the co-host list already used below.
+  if (hostName) eligibleHost.add(hostName);
   for (const c of cohostNames) {
     if (c) eligibleCohost.add(c);
   }
@@ -108,6 +151,23 @@ export default async function SessionOngoingPage({
   }
   myDisplayName ??= user.effectiveUsername;
 
+  // ── SECURITY: only host/co-hosts/assistants on THIS session (or the real
+  // signed-in admin, for support access) may view or edit the panel. Without
+  // this, anyone signed in could open /sessionongoing?session_id=X for any
+  // session and both view and — via the sync API, which has no authorization
+  // check of its own — write to it. This deliberately checks the EFFECTIVE
+  // identity, not the real one: while impersonating a specific person via View
+  // As, access should reflect what THAT person can actually see, which is the
+  // whole point of person-mode impersonation. `user.isAdmin` (real, not
+  // effective) is the one exception — a genuine admin/dev keeps support access
+  // even while impersonating a non-assigned person, since that's a deliberate
+  // "check what this session looks like to nobody in particular" case.
+  const assignedNames = [hostName, ...cohostNames, ...assistantNames].filter((n): n is string => !!n);
+  const isAssigned = assignedNames.some((n) => norm(n) === norm(myDisplayName));
+  if (!isAssigned && !user.isAdmin) {
+    redirect('/dashboard?error=' + encodeURIComponent('You are not assigned to this session.'));
+  }
+
   return (
     <SessionOngoingClient
       initialSession={{
@@ -125,6 +185,7 @@ export default async function SessionOngoingPage({
         assistant_4: assistantNames[3] ?? null,
       } as SessionOngoingRow}
       staffDirectory={staffDirectory}
+      eligibleHosts={[...eligibleHost]}
       eligibleStaff={{ 'Co-Host': [...eligibleCohost], Assistant: [...eligibleAssistant] }}
       scheduledStartIso={scheduledStartIso}
       viewerRole={viewerRole}

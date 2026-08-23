@@ -26,8 +26,17 @@ const LiveSessionContext = createContext<LiveSessionContextValue>({
   reportInactive: () => {},
 });
 
-export function LiveSessionProvider({ children }: { children: ReactNode }) {
-  const [status, setStatus] = useState<LiveSessionStatus | null>(null);
+export function LiveSessionProvider({
+  children,
+  initialStatus = null,
+}: {
+  children: ReactNode;
+  /** Seeded from the server (layout.tsx) so the pill can render correctly on
+   * every page immediately, instead of staying blank until a client-side
+   * poller on /active happens to call reportActive() first. */
+  initialStatus?: LiveSessionStatus | null;
+}) {
+  const [status, setStatus] = useState<LiveSessionStatus | null>(initialStatus);
   const [now, setNow] = useState(() => Date.now());
 
   // only tick while there's actually something live to count up from
