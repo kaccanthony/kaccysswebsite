@@ -12,12 +12,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const supabase = await createClient();
 
   const roleInfo = { rawRole: user.effectiveRole, isStaff: user.viewingAs ? user.effectivePermLevel > 0 : user.isStaff, isAdmin: user.viewingAs ? false : user.isAdmin };
-  const displayName = formatNameWithPrefix(user.username, roleInfo);
+  const displayName = formatNameWithPrefix(user.effectiveUsername, roleInfo);
   const roleLabel = getRoleLabel(roleInfo);
 
   // ── Assigned upcoming sessions (host / co-host / assistant / additional) ──
+  // effectiveUsername, not user.username — same View As identity fix as
+  // /setup, sessionongoing, and the dashboard's my_session card.
   const assignedSessions: AssignedSession[] = [];
-  const myDisplayName = user.username;
+  const myDisplayName = user.effectiveUsername;
 
   if (myDisplayName) {
     const nowBST = new Date();

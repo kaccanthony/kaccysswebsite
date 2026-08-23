@@ -26,7 +26,7 @@ export default async function DashboardPage() {
       .from('session_ongoing')
       .select('session_id')
       .or(
-        `host.eq.${user.effectiveUsername},co_host1.eq.${user.effectiveUsername},co_host2.eq.${user.effectiveUsername},co_host3.eq.${user.effectiveUsername},co_host4_supervisor.eq.${user.effectiveUsername},assistant_1.eq.${user.effectiveUsername},assistant_2.eq.${user.effectiveUsername},assistant_3.eq.${user.effectiveUsername},assistant_4.eq.${user.effectiveUsername}`
+        `host.eq.${user.effectiveUsername},co_host1.eq.${user.effectiveUsername},co_host2.eq.${user.effectiveUsername},co_host3.eq.${user.effectiveUsername},co_host4_supervisor.eq.${user.effectiveUsername},assistant_1.eq.${user.effectiveUsername},assistant_2.eq.${user.effectiveUsername},assistant_3.eq.${user.effectiveUsername},assistant_4.eq.${user.effectiveUsername},additional_staff.ilike.%${user.effectiveUsername}%`
       )
       .maybeSingle();
 
@@ -38,6 +38,12 @@ export default async function DashboardPage() {
     isAdmin: user.effectiveIsAdmin,
     myLiveSessionId,
   });
+
+  <pre style={{ color: 'lime' }}>
+  effectiveUsername: "{user.effectiveUsername}"{'\n'}
+  effectiveRole: "{user.effectiveRole}"{'\n'}
+  myLiveSessionId: {String(myLiveSessionId)}
+</pre>
 
   return (
     <>
