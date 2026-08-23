@@ -49,9 +49,13 @@ function newUid() { return 'u_' + Math.random().toString(36).slice(2) + Date.now
 
 // Ported from makeColumnsResizable() in the original. Mutates th.style.width
 // directly during drag rather than going through React state — same reasoning
-// as the original: a re-render per pixel of mouse movement would be wasteful,
-// and nothing else in the app needs to know the column's exact width live.
-function handleColResizeMouseDown(e: React.MouseEvent<HTMLSpanElement>) {
+// as the original: a re-render per pixel of mouse movement would be wasteful.
+// The optional onResize callback fires once, on mouseup, with the final width —
+// this is what lets a column that gets a React-rendered width (the trainee
+// table, whose columns can be hidden/shown) persist a manual resize across
+// re-renders instead of snapping back to its default every time the component
+// re-renders (which happens often — e.g. every second, from the timer tick).
+function handleColResizeMouseDown(e: React.MouseEvent<HTMLSpanElement>, onResize?: (width: number) => void) {
   e.preventDefault();
   const handle = e.currentTarget;
   const th = handle.closest('th') as HTMLElement | null;
@@ -66,13 +70,14 @@ function handleColResizeMouseDown(e: React.MouseEvent<HTMLSpanElement>) {
     handle.classList.remove(styles.resizing);
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
+    onResize?.(th!.offsetWidth);
   }
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
 }
 
-function ColResizeHandle() {
-  return <span className={styles.colResizer} onMouseDown={handleColResizeMouseDown} />;
+function ColResizeHandle({ onResize }: { onResize?: (width: number) => void }) {
+  return <span className={styles.colResizer} onMouseDown={(e) => handleColResizeMouseDown(e, onResize)} />;
 }
 
 // Ported from renderScriptPreview() / escapeForPreview() in the original.
@@ -551,16 +556,27 @@ export default function SessionOngoingClient(props: Props) {
 
   // ── column show/hide — mirrors TRAINEE_COLUMNS / EXTRA_COLUMNS / hide-extras-btn ──
   const TRAINEE_COLUMNS = [
-    { n: 1, label: 'Pop-out' }, { n: 2, label: 'Slot' }, { n: 3, label: 'Trainee Discord' },
-    { n: 4, label: 'Discord ID' }, { n: 5, label: 'Roblox' }, { n: 6, label: 'Zone' },
-    { n: 7, label: 'Timer' }, { n: 8, label: 'Timer Pop-out' }, { n: 9, label: 'Attendance' },
-    { n: 10, label: 'Trainer' }, { n: 11, label: 'Trainer Discord ID' }, { n: 12, label: 'Feedback' },
-    { n: 13, label: 'Announcements' }, { n: 14, label: 'Trainee Notes' }, { n: 15, label: 'Completed' },
-    { n: 16, label: 'Remove' },
+    { n: 1, label: 'Pop-out', minWidth: 70, maxWidth: 80, width: 74 },
+    { n: 2, label: 'Slot', minWidth: 64, maxWidth: 80, width: 70 },
+    { n: 3, label: 'Trainee Discord', minWidth: 110, maxWidth: 160, width: 130 },
+    { n: 4, label: 'Discord ID', minWidth: 90, maxWidth: 140, width: 100 },
+    { n: 5, label: 'Roblox', minWidth: 90, maxWidth: 140, width: 100 },
+    { n: 6, label: 'Zone', minWidth: 90, maxWidth: 120, width: 100 },
+    { n: 7, label: 'Timer', minWidth: 190, maxWidth: 220, width: 190 },
+    { n: 8, label: 'Timer Pop-out', minWidth: 120, maxWidth: 140, width: 120 },
+    { n: 9, label: 'Attendance', minWidth: 100, maxWidth: 120, width: 110 },
+    { n: 10, label: 'Trainer', minWidth: 110, maxWidth: 160, width: 126 },
+    { n: 11, label: 'Trainer Discord ID', minWidth: 120, maxWidth: 160, width: 140 },
+    { n: 12, label: 'Feedback', minWidth: 110, maxWidth: 130, width: 110 },
+    { n: 13, label: 'Announcements', minWidth: 160, maxWidth: 240, width: 220 },
+    { n: 14, label: 'Trainee Notes', minWidth: 150, maxWidth: 240, width: 200 },
+    { n: 15, label: 'Completed', minWidth: 100, maxWidth: 130, width: 110 },
+    { n: 16, label: 'Remove', minWidth: 70, maxWidth: 90, width: 80 },
   ] as const;
   // Pop-out columns (1, 8) are deliberately excluded from "Hide extras" — same as the original.
   const EXTRA_COLUMN_NUMS = new Set([2, 4, 9, 11, 14, 16]);
   const [hiddenCols, setHiddenCols] = useState<Set<number>>(new Set());
+  const [colWidths, setColWidths] = useState<Record<number, number>>({});
   const [colPickerOpen, setColPickerOpen] = useState(false);
   const colPickerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -1110,9 +1126,9 @@ Thank you for attending.`;
               <thead>
                 <tr>
                   {TRAINEE_COLUMNS.map((col) => !hiddenCols.has(col.n) && (
-                    <th key={col.n}>
+                    <th key={col.n} style={{ minWidth: col.minWidth, maxWidth: col.maxWidth, width: colWidths[col.n] ?? col.width }}>
                       {col.label}
-                      <ColResizeHandle />
+                      <ColResizeHandle onResize={(w) => setColWidths((prev) => ({ ...prev, [col.n]: w }))} />
                     </th>
                   ))}
                 </tr>
