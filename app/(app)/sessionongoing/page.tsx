@@ -58,6 +58,18 @@ export default async function SessionOngoingPage({
     .from('staff_profiles')
     .select('id, staff_rank, profiles!inner(discord_username)');
 
+  // session_ongoing has NO host/co_host1-4/assistant_1-4 columns — those live
+  // as rows in session_staff (role + staff_name), see db.txt. Pull this
+  // session's assignments from there instead of the old flat-column read.
+  const { data: staffRows } = await supabase
+    .from('session_staff')
+    .select('role, staff_name')
+    .eq('session_id', sessionId);
+
+  const hostName = staffRows?.find((s) => s.role === 'Host')?.staff_name ?? null;
+  const cohostNames = (staffRows ?? []).filter((s) => s.role === 'Co-Host').map((s) => s.staff_name);
+  const assistantNames = (staffRows ?? []).filter((s) => s.role === 'Assistant').map((s) => s.staff_name);
+
   // staff_id in the old MySQL schema is now the Supabase auth uid (see profiles.id
   // in db.txt) — build the same "display name -> id" directory the PHP version did.
   const staffDirectory: Record<string, string> = {};
@@ -73,7 +85,7 @@ export default async function SessionOngoingPage({
     if (cohostEligibleRanks.includes(row.staff_rank)) eligibleCohost.add(name);
     if (assistantEligibleRanks.includes(row.staff_rank)) eligibleAssistant.add(name);
   }
-  for (const c of [sessionRow.co_host1, sessionRow.co_host2, sessionRow.co_host3, sessionRow['co_host4/supervisor']]) {
+  for (const c of cohostNames) {
     if (c) eligibleCohost.add(c);
   }
 
@@ -90,18 +102,27 @@ export default async function SessionOngoingPage({
 
   let viewerRole: ViewerRole = 'Assistant';
   if (myDisplayName) {
-    if (sessionRow.host === myDisplayName) viewerRole = 'Host';
-    else if (
-      [sessionRow.co_host1, sessionRow.co_host2, sessionRow.co_host3, sessionRow['co_host4/supervisor']].includes(myDisplayName)
-    ) {
-      viewerRole = 'Co-Host';
-    }
+    if (hostName === myDisplayName) viewerRole = 'Host';
+    else if (cohostNames.includes(myDisplayName)) viewerRole = 'Co-Host';
   }
   myDisplayName ??= user.effectiveUsername;
 
   return (
     <SessionOngoingClient
-      initialSession={{ ...sessionRow, started_at: startedAt } as SessionOngoingRow}
+      initialSession={{
+        ...sessionRow,
+        started_at: startedAt,
+        // merged in from session_staff — see comment above
+        host: hostName,
+        co_host1: cohostNames[0] ?? null,
+        co_host2: cohostNames[1] ?? null,
+        co_host3: cohostNames[2] ?? null,
+        'co_host4/supervisor': cohostNames[3] ?? null,
+        assistant_1: assistantNames[0] ?? null,
+        assistant_2: assistantNames[1] ?? null,
+        assistant_3: assistantNames[2] ?? null,
+        assistant_4: assistantNames[3] ?? null,
+      } as SessionOngoingRow}
       staffDirectory={staffDirectory}
       eligibleStaff={{ 'Co-Host': [...eligibleCohost], Assistant: [...eligibleAssistant] }}
       scheduledStartIso={scheduledStartIso}

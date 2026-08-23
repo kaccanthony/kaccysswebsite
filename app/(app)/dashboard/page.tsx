@@ -16,21 +16,32 @@ export default async function DashboardPage() {
   const supabase = await createClient();
 
   // ── Is this person currently running a live session? (for the "my_session" card) ──
-  // Uses effectiveUsername, not user.username — a 'person' mode View As session needs
-  // this to check the IMPERSONATED person's live sessions, same fix as /setup and
-  // sessionongoing. 'rank' mode has no personLabel, so this still falls back to the
-  // real username exactly as before.
+  // session_ongoing has no host/co_host*/assistant* columns anymore (see db.txt) —
+  // staff assignment now lives entirely in session_staff (role/staff_name rows,
+  // same table managesession/setupsesh already read via findPrimaryStaff). Query
+  // that instead: any session_staff row for this person, on ANY primary role
+  // (HOST/CH_1-4/AST_1-4, IH-suffixed or not) or additional-staff row, whose
+  // session_id also exists in session_ongoing right now.
   let myLiveSessionId: number | null = null;
   if (user.effectiveUsername) {
-    const { data: liveSession } = await supabase
-      .from('session_ongoing')
+    const { data: staffRows, error: staffErr } = await supabase
+      .from('session_staff')
       .select('session_id')
-      .or(
-        `host.eq.${user.effectiveUsername},co_host1.eq.${user.effectiveUsername},co_host2.eq.${user.effectiveUsername},co_host3.eq.${user.effectiveUsername},co_host4_supervisor.eq.${user.effectiveUsername},assistant_1.eq.${user.effectiveUsername},assistant_2.eq.${user.effectiveUsername},assistant_3.eq.${user.effectiveUsername},assistant_4.eq.${user.effectiveUsername},additional_staff.ilike.%${user.effectiveUsername}%`
-      )
-      .maybeSingle();
+      .eq('staff_name', user.effectiveUsername);
 
-    myLiveSessionId = liveSession?.session_id ?? null;
+    if (staffErr) {
+      console.error('session_staff lookup failed:', staffErr.message);
+    } else if (staffRows && staffRows.length > 0) {
+      const candidateIds = staffRows.map((r) => r.session_id);
+      const { data: liveSession, error: liveErr } = await supabase
+        .from('session_ongoing')
+        .select('session_id')
+        .in('session_id', candidateIds)
+        .maybeSingle();
+
+      if (liveErr) console.error('session_ongoing lookup failed:', liveErr.message);
+      myLiveSessionId = liveSession?.session_id ?? null;
+    }
   }
 
   const cards = getVisibleCards({
