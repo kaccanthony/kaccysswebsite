@@ -39,16 +39,16 @@ export default async function DashboardPage() {
     myLiveSessionId,
   });
 
-  <pre style={{ color: 'lime' }}>
-  effectiveUsername: "{user.effectiveUsername}"{'\n'}
-  effectiveRole: "{user.effectiveRole}"{'\n'}
-  myLiveSessionId: {String(myLiveSessionId)}
-</pre>
-
   return (
     <>
       <h1 className="section-label">Dashboard</h1>
       <p className="section-sub">Welcome back, {user.effectiveUsername}.</p>
+
+      <pre style={{ color: 'lime' }}>
+        effectiveUsername: "{user.effectiveUsername}"{'\n'}
+        effectiveRole: "{user.effectiveRole}"{'\n'}
+        myLiveSessionId: {String(myLiveSessionId)}
+      </pre>
 
       <div className="bento-grid">
         {cards.length === 0 ? (
