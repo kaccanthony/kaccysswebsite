@@ -40,7 +40,7 @@
 .infoGrid { display: grid; grid-template-columns: repeat(4, 1fr); }
 .infoCell { padding: 14px 20px; border-right: 1px solid rgba(255,255,255,.10); border-bottom: 1px solid rgba(255,255,255,.10); }
 .infoLabel { font-size: .66rem; text-transform: uppercase; letter-spacing: .08em; color: rgba(255,255,255,.32); margin-bottom: 6px; }
-.cellInput { width: 100%; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.18); border-radius: 8px; color: #fff; padding: 7px 10px; font-size: .82rem; font-family: inherit; }
+.cellInput { box-sizing: border-box; min-width: 0; width: 100%; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.18); border-radius: 8px; color: #fff; padding: 7px 10px; font-size: .82rem; font-family: inherit; }
 .cellInput:disabled { opacity: .5; cursor: not-allowed; }
 .globalTimerValue { font-family: 'JetBrains Mono', monospace; font-size: 1.4rem; font-weight: 600; color: #7cc4ff; }
 
@@ -74,8 +74,8 @@
 .slotCell { display: flex; align-items: center; gap: 6px; }
 .slotNum { color: rgba(255,255,255,.32); font-size: .74rem; text-align: center; flex-shrink: 0; }
 .orderBtn { width: 20px; height: 20px; border-radius: 5px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.05); color: rgba(255,255,255,.6); font-size: .6rem; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-.orderBtn:hover:not(:disabled) { background: rgba(255,255,255,.12); }
-.orderBtn:disabled { opacity: .25; cursor: not-allowed; }
+.orderBtn:hover:not(:disabled):not(.locked) { background: rgba(255,255,255,.12); }
+.orderBtn:disabled, .orderBtn.locked { opacity: .25; cursor: not-allowed; }
 
 .pipBtn, .timerPipBtn { width: 26px; height: 26px; border-radius: 7px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.05); color: rgba(255,255,255,.7); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-size: .7rem; }
 .pipBtn:hover, .timerPipBtn:hover { background: rgba(124,196,255,.14); border-color: #7cc4ff; color: #7cc4ff; }
@@ -92,9 +92,9 @@
 .colResizer { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; user-select: none; }
 .colResizer:hover, .colResizer.resizing { background: rgba(124,196,255,.35); }
 .tableWrap thead th, .driversTable thead th, .staffTable thead th { position: sticky; top: 0; background: #141414; color: rgba(255,255,255,.55); font-size: .65rem; text-transform: uppercase; padding: 10px; border-bottom: 1px solid rgba(255,255,255,.18); border-right: 1px solid rgba(255,255,255,.10); white-space: nowrap; }
-.tableWrap tbody td, .driversTable tbody td, .staffTable tbody td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.10); border-right: 1px solid rgba(255,255,255,.10); color: rgba(255,255,255,.85); }
+.tableWrap tbody td, .driversTable tbody td, .staffTable tbody td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.10); border-right: 1px solid rgba(255,255,255,.10); color: rgba(255,255,255,.85); overflow: hidden; }
 
-.timerCell { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.timerCell { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: nowrap; }
 .timerDisplay { font-family: 'JetBrains Mono', monospace; font-size: .82rem; font-variant-numeric: tabular-nums; min-width: 42px; color: rgba(255,255,255,.55); }
 .timerDisplay.running { color: #4ade80; }
 .timerDisplay.low { color: #f5a524; }
@@ -116,10 +116,11 @@
 
 .addRowBar { padding: 10px 20px; display: flex; gap: 10px; border-top: 1px solid rgba(255,255,255,.10); }
 .addBtn { display: flex; align-items: center; gap: 7px; padding: 8px 14px; border-radius: 9px; border: 1px dashed rgba(255,255,255,.18); background: transparent; color: rgba(255,255,255,.55); font-size: .78rem; cursor: pointer; }
-.addBtn:disabled { opacity: .35; cursor: not-allowed; }
+.addBtn:disabled, .addBtn.locked { opacity: .35; cursor: not-allowed; }
 
 .twoCol { display: grid; grid-template-columns: 1fr 1.4fr; gap: 20px; }
 .driversTable, .staffTable { width: 100%; border-collapse: collapse; font-size: .80rem; }
+.tableWrap .driversTable, .tableWrap .staffTable { min-width: 0; }
 
 .driversTable th:nth-child(1) { min-width: 120px; max-width: 400px; width: 200px; } /* Discord */
 .driversTable th:nth-child(2) { min-width: 120px; max-width: 400px; width: 200px; } /* Roblox */
@@ -174,7 +175,7 @@
 
 .announcePanel { position: absolute; right: 0; bottom: calc(100% + 12px); display: none; width: 280px; background: rgba(18,18,20,.94); border: 1px solid rgba(255,255,255,.18); border-radius: 14px; box-shadow: 0 16px 48px rgba(0,0,0,.55); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); overflow: hidden; }
 .announcePanel.open { display: block; animation: bellPanelIn .2s ease both; }
-.announcePanelHeader { padding: 10px 14px; background: rgba(255,255,255,.05); border-bottom: 1px solid rgba(255,255,255,.10); font-size: .78rem; color: rgba(255,255,255,.85); display: flex; align-items: center; gap: 8px; }
+.announcePanelHeader { padding: 10px 14px; background: rgba(255,255,255,.05); border-bottom: 1px solid rgba(255,255,255,.10); font-size: .78rem; color: rgba(255,255,255,.85); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .announcePanelHeader svg { color: #ff9f43; margin-right: auto; }
 .announcePanelBody { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; }
 .announcePanelBody textarea { width: 100%; min-height: 80px; resize: vertical; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.18); border-radius: 8px; color: #fff; padding: 8px 10px; font: inherit; font-size: .8rem; }

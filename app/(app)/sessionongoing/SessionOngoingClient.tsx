@@ -18,6 +18,7 @@ import { ICONS, type IconKey } from '@/lib/icons';
 import { useSessionRealtime } from '@/lib/supabase/useSessionRealtime';
 import { useBellRealtime } from '@/lib/supabase/useBellRealtime';
 import { useAnnouncementBroadcast } from '@/lib/supabase/useAnnouncementBroadcast';
+import { useLiveSession } from '../LiveSessionContext';
 import { ZONE_DATA, ZONES, ANNOUNCEMENT_TEMPLATE, SCRIPT_LINES, STATION_LIST, buildStationAnnouncement, STAFF_ROLES, buildReportText } from '@/lib/session/constants';
 import type {
   SessionOngoingRow, LiveState, TimerState, DriverRow, StaffShiftRow, FeedbackDataMap,
@@ -78,6 +79,40 @@ function handleColResizeMouseDown(e: React.MouseEvent<HTMLSpanElement>, onResize
 
 function ColResizeHandle({ onResize }: { onResize?: (width: number) => void }) {
   return <span className={styles.colResizer} onMouseDown={(e) => handleColResizeMouseDown(e, onResize)} />;
+}
+
+// Ported from enableBellDrag()/enableAnnounceDrag() in the original — lets the
+// bell/announce FABs be dragged anywhere on screen. mousedown starts tracking;
+// if the mouse actually moves, the widget follows the cursor (clamped to the
+// viewport, direct DOM mutation during drag — same reasoning as ColResizeHandle,
+// avoids a re-render per pixel). On mouseup, if it *didn't* move, that was a
+// plain click, so the panel-toggle callback fires instead.
+function useDraggableWidget(widgetRef: React.RefObject<HTMLDivElement | null>, onClickNoMove: () => void) {
+  return useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const widget = widgetRef.current;
+    if (!widget) return;
+    let moved = false;
+    const rect = widget.getBoundingClientRect();
+    const offsetX = e.clientX - rect.left;
+    const offsetY = e.clientY - rect.top;
+    function onMove(ev: MouseEvent) {
+      moved = true;
+      const maxLeft = window.innerWidth - widget!.offsetWidth;
+      const maxTop = window.innerHeight - widget!.offsetHeight;
+      widget!.style.left = Math.min(Math.max(0, ev.clientX - offsetX), maxLeft) + 'px';
+      widget!.style.top = Math.min(Math.max(0, ev.clientY - offsetY), maxTop) + 'px';
+      widget!.style.right = 'auto';
+      widget!.style.bottom = 'auto';
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      if (!moved) onClickNoMove();
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [widgetRef, onClickNoMove]);
 }
 
 // Ported from renderScriptPreview() / escapeForPreview() in the original.
@@ -201,6 +236,8 @@ export default function SessionOngoingClient(props: Props) {
   const [announceBanner, setAnnounceBanner] = useState<string | null>(null);
   const [announceFullscreen, setAnnounceFullscreen] = useState<string | null>(null);
   const announceWidgetRef = useRef<HTMLDivElement>(null);
+  const dragBellFab = useDraggableWidget(bellWidgetRef, () => setBellPanelOpen((o) => !o));
+  const dragAnnounceFab = useDraggableWidget(announceWidgetRef, () => setAnnouncePanelOpen((o) => !o));
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (announceWidgetRef.current && !announceWidgetRef.current.contains(e.target as Node)) setAnnouncePanelOpen(false);
@@ -224,11 +261,11 @@ export default function SessionOngoingClient(props: Props) {
     return () => clearInterval(id);
   }, []);
   const [elapsed, setElapsed] = useState(0);
-  const [lastSyncedAt, setLastSyncedAt] = useState(Date.now());
-  const [syncNoteTick, setSyncNoteTick] = useState(0);
+  const { reportActive, reportInactive } = useLiveSession();
   useEffect(() => {
-    const id = setInterval(() => setSyncNoteTick((t) => t + 1), 1000);
-    return () => clearInterval(id);
+    reportActive(true);
+    return () => reportInactive();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const dirtyRef = useRef({ live: false, staffCore: false, overrides: false, status: false, details: false, attendance: false, traineeRows: new Set<string>() });
@@ -252,6 +289,26 @@ export default function SessionOngoingClient(props: Props) {
       for (const r of allocatedRows) if (!known.has(r)) next.push(r);
       return next;
     });
+  }, [allocatedRows]);
+
+  // Seed every allocated row's timer on mount (and if num_slots grows later) —
+  // fixes a silent no-op bug where toggleTimer/recordSetupDone bailed out if
+  // timers[row] didn't exist yet, which previously meant Play and Setup Done
+  // did nothing until some other action (like Reset, which didn't have this
+  // guard) happened to create the row's entry first.
+  useEffect(() => {
+    setTimers((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const row of allocatedRows) {
+        if (!next[row]) {
+          next[row] = { remainingSeconds: (session.trainee_timer || 12) * 60, running: false, syncedAt: Date.now() };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allocatedRows]);
 
   // ── controlled state for editable trainee-detail fields ──
@@ -290,6 +347,13 @@ export default function SessionOngoingClient(props: Props) {
     setToasts((t) => [...t, { id, message }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3000);
   }, []);
+  // Native `disabled` blocks the click event entirely, so a toast could never
+  // fire from it — this is the alternative for controls where we want an
+  // explicit "here's why" message instead of just a greyed-out look.
+  const lockedClick = useCallback((isLocked: boolean, message: string, action: () => void) => {
+    if (isLocked) { showToast(message); return; }
+    action();
+  }, [showToast]);
   const showConfirm = useCallback((message: string, title = 'Are you sure?') => {
     return new Promise<boolean>((resolve) => setConfirmState({ title, message, resolve }));
   }, []);
@@ -318,6 +382,15 @@ export default function SessionOngoingClient(props: Props) {
     if (remote.staffShift) setStaffShift(remote.staffShift);
     if (remote.unallocatedTrainees) setUnallocated(remote.unallocatedTrainees);
     if (remote.slotOrder) setRowOrder(remote.slotOrder);
+    if (row.trainee_attendance && !dirtyRef.current.attendance) {
+      const parts = row.trainee_attendance.split(',');
+      const order = remote.slotOrder ?? rowOrder;
+      setAttendance((prev) => {
+        const next = { ...prev };
+        order.forEach((r, i) => { next[r] = parts[i] === '1'; });
+        return next;
+      });
+    }
     if (remote.overrides) setOverrides(remote.overrides);
     if (remote.timers) {
       setTimers((prev) => {
@@ -326,7 +399,7 @@ export default function SessionOngoingClient(props: Props) {
         return next;
       });
     }
-    setLastSyncedAt(Date.now());
+    reportActive(true);
   });
 
   useBellRealtime(sessionId, setBell);
@@ -510,12 +583,12 @@ export default function SessionOngoingClient(props: Props) {
   // ── trainee timer controls (replace toggleTimer/resetTimer/setTimerValue/recordSetupDone) ──
   const toggleTimer = useCallback((row: string) => {
     setTimers((prev) => {
-      const t = prev[row]; if (!t) return prev;
+      const t = prev[row] ?? { remainingSeconds: (session.trainee_timer || 12) * 60, running: false, syncedAt: Date.now() };
       if (!t.running) return { ...prev, [row]: { ...t, running: true, syncedAt: Date.now() } };
       return { ...prev, [row]: { ...t, running: false, remainingSeconds: computeCurrentRemaining(t) } };
     });
     queueSync();
-  }, [queueSync]);
+  }, [queueSync, session.trainee_timer]);
 
   const resetTimer = useCallback((row: string, totalSeconds: number) => {
     setTimers((prev) => ({ ...prev, [row]: { remainingSeconds: totalSeconds, running: false, syncedAt: Date.now(), setupSeconds: prev[row]?.setupSeconds } }));
@@ -531,7 +604,7 @@ export default function SessionOngoingClient(props: Props) {
 
   const recordSetupDone = useCallback((row: string, totalSeconds: number) => {
     setTimers((prev) => {
-      const t = prev[row]; if (!t) return prev;
+      const t = prev[row] ?? { remainingSeconds: totalSeconds, running: false, syncedAt: Date.now() };
       const setupSeconds = Math.max(0, totalSeconds - computeCurrentRemaining(t));
       return { ...prev, [row]: { ...t, setupSeconds } };
     });
@@ -868,15 +941,10 @@ Thank you for attending.`;
 
   return (
     <div className={styles.wrap}>
-      {/* AppShell already renders the app-wide header/profile — this page no
-          longer renders its own. Just the live-status pill stays, as a small
-          inline row above the session title (not a fixed full-width bar). */}
+      {/* AppShell already renders the app-wide header/profile and the
+          LIVE SESSION pill, via LiveStatusPill reading the same
+          LiveSessionContext this component reports into above. */}
       <main>
-        <div className={styles.livePill} style={{ marginBottom: 10 }}>
-          <span className={styles.liveDot} /> LIVE SESSION
-          <span className={styles.syncNote}>synced {Math.floor((Date.now() - lastSyncedAt) / 1000)}s ago</span>
-        </div>
-
         <div className={styles.sessionHead}>
           <div className={styles.sessionTitle}>Session #{sessionId} — {session.session_name || 'Untitled Session'}</div>
           <div className={styles.sessionSub}>Viewing as <strong>{viewerRole}</strong></div>
@@ -1153,18 +1221,18 @@ Thank you for attending.`;
                           <div className={styles.slotCell}>
                             <button
                               type="button"
-                              className={styles.orderBtn}
-                              disabled={locked.slotOrder || orderIndex === 0}
-                              onClick={() => moveSlot(row, 'up')}
+                              className={`${styles.orderBtn} ${locked.slotOrder ? styles.locked : ''}`}
+                              disabled={orderIndex === 0}
+                              onClick={() => lockedClick(locked.slotOrder, 'Slot ordering is locked. Ask the host to enable Override Slot Ordering.', () => moveSlot(row, 'up'))}
                             >
                               <FontAwesomeIcon icon={ICONS.caretUp} />
                             </button>
                             <span className={styles.slotNum}>{orderIndex + 1}</span>
                             <button
                               type="button"
-                              className={styles.orderBtn}
-                              disabled={locked.slotOrder || orderIndex === rowOrder.length - 1}
-                              onClick={() => moveSlot(row, 'down')}
+                              className={`${styles.orderBtn} ${locked.slotOrder ? styles.locked : ''}`}
+                              disabled={orderIndex === rowOrder.length - 1}
+                              onClick={() => lockedClick(locked.slotOrder, 'Slot ordering is locked. Ask the host to enable Override Slot Ordering.', () => moveSlot(row, 'down'))}
                             >
                               <FontAwesomeIcon icon={ICONS.caretDown} />
                             </button>
@@ -1222,6 +1290,16 @@ Thank you for attending.`;
                               <button className={`${styles.timerBtn} ${t.running ? styles.active : ''}`} onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t.running ? ICONS.pause : ICONS.play} /></button>
                               <button className={styles.timerBtn} onClick={() => resetTimer(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.redo} /></button>
                               <button className={styles.timerBtn} onClick={() => recordSetupDone(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.check} /></button>
+                              <button
+                                className={styles.timerBtn}
+                                title="Override timer value"
+                                onClick={() => {
+                                  const input = window.prompt('Set timer to MM:SS (e.g. 05:30):', fmt(live));
+                                  if (input !== null) setTimerValue(row, input);
+                                }}
+                              >
+                                <FontAwesomeIcon icon={ICONS.triangleExclamation} />
+                              </button>
                             </>
                           )}
                         </td>
@@ -1381,7 +1459,10 @@ Thank you for attending.`;
             </table>
           </div>
           <div className={styles.addRowBar}>
-            <button className={styles.addBtn} disabled={locked.trainees} onClick={addUnallocatedTrainee}>
+            <button
+              className={`${styles.addBtn} ${locked.trainees ? styles.locked : ''}`}
+              onClick={() => lockedClick(locked.trainees, 'This requires the Override Trainees toggle. Ask the host to enable it.', addUnallocatedTrainee)}
+            >
               <FontAwesomeIcon icon={ICONS.plus} /> Add unallocated trainee
             </button>
           </div>
@@ -1391,6 +1472,7 @@ Thank you for attending.`;
         <div className={styles.twoCol}>
           <section className={styles.panel}>
             <div className={styles.panelTitle}>Drivers</div>
+            <div className={styles.tableWrap}>
             <table className={`${styles.driversTable} ${styles.resizableCols}`}>
               <thead><tr><th>Discord<ColResizeHandle /></th><th>Roblox<ColResizeHandle /></th><th>Attendance<ColResizeHandle /></th><th /></tr></thead>
               <tbody>
@@ -1409,6 +1491,7 @@ Thank you for attending.`;
                 ))}
               </tbody>
             </table>
+            </div>
             <div className={styles.addRowBar}>
               <button className={styles.addBtn} onClick={() => { setDrivers((p) => [...p, { discord: '', roblox: '', attended: false }]); queueSync(); }}>
                 <FontAwesomeIcon icon={ICONS.plus} /> Add driver
@@ -1418,6 +1501,7 @@ Thank you for attending.`;
 
           <section className={styles.panel}>
             <div className={styles.panelTitle}>Staff</div>
+            <div className={styles.tableWrap}>
             <table className={`${styles.staffTable} ${styles.resizableCols}`}>
               <thead><tr><th>Role in Shift<ColResizeHandle /></th><th>Discord<ColResizeHandle /></th><th>Attendance<ColResizeHandle /></th><th>Notes<ColResizeHandle /></th><th /></tr></thead>
               <tbody>
@@ -1450,6 +1534,7 @@ Thank you for attending.`;
                 ))}
               </tbody>
             </table>
+            </div>
             <div className={styles.addRowBar}>
               <button className={styles.addBtn} disabled={staffShift.length >= 10}
                 onClick={() => { setStaffShift((p) => [...p, { role: 'Assistant', discord: '', notes: '', attended: false }]); dirtyRef.current.staffCore = true; queueSync(); }}>
@@ -1593,7 +1678,7 @@ Thank you for attending.`;
             })}
           </div>
         </div>
-        <button className={styles.bellFab} title="Open Bell System" onClick={() => setBellPanelOpen((o) => !o)}>
+        <button className={styles.bellFab} title="Open Bell System" onMouseDown={dragBellFab}>
           <FontAwesomeIcon icon={ICONS.bell} />
           <span className={`${styles.bellFabDot} ${bell?.active ? styles.show : ''}`} />
         </button>
@@ -1627,7 +1712,7 @@ Thank you for attending.`;
               </button>
             </div>
           </div>
-          <button className={styles.announceFab} title="Announce to everyone" onClick={() => setAnnouncePanelOpen((o) => !o)}>
+          <button className={styles.announceFab} title="Announce to everyone" onMouseDown={dragAnnounceFab}>
             <FontAwesomeIcon icon={ICONS.bullhorn} />
           </button>
         </div>
