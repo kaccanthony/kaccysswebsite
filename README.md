@@ -81,23 +81,6 @@ The application uses the following key tables:
 - Supabase account
 - Discord application (for OAuth)
 
-### Environment Variables
-Create a `.env.local` file with:
-```
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_server_only_service_role_key
-```
-
-`SUPABASE_SERVICE_ROLE_KEY` is server-only. Never prefix it with
-`NEXT_PUBLIC_` or expose it to browser code.
-
-### Installation
-```bash
-npm install
-npm run dev
-```
-
 ### Database Setup
 1. Treat `database/current_db.sql` as the current schema reference. The older
    `database/schema.sql` is a legacy snapshot and must not be run.
