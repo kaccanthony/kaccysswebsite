@@ -86,6 +86,7 @@
 
 .trainee-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .trainee-chip { display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 8px 10px; }
+.trainee-chip--reserved { background: rgba(255,190,80,.06); border-color: rgba(255,190,80,.22); }
 .trainee-chip-avatar { width: 26px; height: 26px; border-radius: 50%; background: rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: center; font-size: 0.7rem; color: rgba(255,255,255,0.5); }
 .trainee-chip-name { font-size: 0.78rem; font-weight: 500; color: #fff; }
 .trainee-chip-zone { font-size: 0.65rem; color: rgba(255,255,255,0.40); }
@@ -179,6 +180,7 @@
     background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;
 }
 .trainee-slot-header { display: flex; align-items: center; justify-content: space-between; }
+.reserved-slot-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .trainee-slot-label { font-size: 0.70rem; font-weight: 600; color: rgba(255,255,255,0.40); letter-spacing: 0.04em; text-transform: uppercase; }
 
 .btn-paste {

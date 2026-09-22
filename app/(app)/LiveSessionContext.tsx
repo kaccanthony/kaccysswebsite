@@ -4,7 +4,7 @@
 // AppShell's header (and back down to the page's own status pill), so both
 // places always agree instead of AppShell guessing from the URL alone.
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 
 export interface LiveSessionStatus {
   active: boolean;
@@ -14,8 +14,8 @@ export interface LiveSessionStatus {
 interface LiveSessionContextValue {
   status: LiveSessionStatus | null; // null = not yet known (nothing has reported in)
   now: number; // ticks once per second while a session is active
-  /** Call on every successful poll. Pass changed=true only when the data actually differs from before. */
-  reportActive: (changed: boolean) => void;
+  /** Pass changedAt when hydrating from a persisted database timestamp. */
+  reportActive: (changed: boolean, changedAt?: number) => void;
   reportInactive: () => void;
 }
 
@@ -46,17 +46,19 @@ export function LiveSessionProvider({
     return () => clearInterval(id);
   }, [status?.active]);
 
-  function reportActive(changed: boolean) {
+  const reportActive = useCallback((changed: boolean, changedAt?: number) => {
+    const reportedAt = Date.now();
+    const persistedAt = Number.isFinite(changedAt) ? Number(changedAt) : null;
     setStatus((prev) => ({
       active: true,
-      lastChangeAt: changed || !prev?.active ? Date.now() : prev.lastChangeAt,
+      lastChangeAt: persistedAt ?? (changed || !prev?.active ? reportedAt : prev.lastChangeAt),
     }));
-    setNow(Date.now());
-  }
+    setNow(reportedAt);
+  }, []);
 
-  function reportInactive() {
+  const reportInactive = useCallback(() => {
     setStatus({ active: false, lastChangeAt: Date.now() });
-  }
+  }, []);
 
   return (
     <LiveSessionContext.Provider value={{ status, now, reportActive, reportInactive }}>

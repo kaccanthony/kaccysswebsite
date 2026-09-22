@@ -6,7 +6,8 @@
 // re-fetches the current board when someone else changes a row, instead of the old
 // "you only see fresh data if you reload" behaviour.
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, useCallback, type ReactNode, type SyntheticEvent } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { createClient } from '@/utils/supabase/client';
 import { MANAGE_ICONS } from '@/lib/manageIcons';
@@ -17,11 +18,19 @@ import './manage.css';
 import { postNotification } from '@/app/actions/postNotification';
 import { searchProfiles, type ProfileSuggestion } from '@/lib/profileSearch';
 import { VIEWABLE_RANKS, labelForRank } from '@/lib/viewAs/rankMap';
+import type { SiteTimezoneMode } from '@/lib/siteTimezone';
 
 const REALTIME_ENABLED = true; // flip off if you'd rather not run a channel per board
 
 type Row = Record<string, any>;
 type Groups = Record<string, [string, BoardConfig][]>;
+type SortDirection = 'default' | 'asc' | 'desc';
+type TableColumn = { key: string; definition: ColumnDef };
+
+const VIRTUALIZATION_THRESHOLD = 50;
+const VIRTUAL_OVERSCAN = 8;
+const ESTIMATED_BOARD_ROW_HEIGHT = 49;
+const estimateBoardRowHeight = () => ESTIMATED_BOARD_ROW_HEIGHT;
 
 const NOTIF_CATEGORIES = ['Session', 'Event', 'Feedback', 'Website', 'Manager', 'System', 'Admin', 'Update'];
 const NOTIF_CAT_CLASS: Record<string, string> = {
@@ -57,11 +66,237 @@ function truncate(str: string, n: number) {
   return str.length > n ? str.slice(0, n) + '…' : str;
 }
 
+function hideBrokenImage(event: SyntheticEvent<HTMLImageElement>) {
+  event.currentTarget.style.display = 'none';
+}
+
+function formatStaffRosterJson(raw: any) {
+  let parsed: any;
+  try { parsed = typeof raw === 'string' ? JSON.parse(raw) : raw; }
+  catch { return <span title={String(raw)}>{truncate(String(raw), 40)}</span>; }
+  const lines: ReactNode[] = [];
+  if (Array.isArray(parsed)) {
+    parsed.forEach((entry, index) => {
+      if (entry && typeof entry === 'object') {
+        const role = entry.role || entry.position || 'Staff';
+        const name = entry.name || entry.discord || entry.display_name || entry.discordName || '—';
+        lines.push(<div className="ms-json-line" key={index}><b>{role}:</b> {name}</div>);
+      } else {
+        lines.push(<div className="ms-json-line" key={index}>{String(entry)}</div>);
+      }
+    });
+  } else if (parsed && typeof parsed === 'object') {
+    Object.entries(parsed).forEach(([role, name], index) => {
+      lines.push(<div className="ms-json-line" key={index}><b>{role}:</b> {typeof name === 'object' ? JSON.stringify(name) : String(name)}</div>);
+    });
+  }
+  if (lines.length === 0) return <span className="ms-empty-value">—</span>;
+  return <div className="ms-json-summary">{lines}</div>;
+}
+
+type CellRenderer = (columnKey: string, definition: ColumnDef, row: Row) => ReactNode;
+
+const ManageTableHeaderCell = memo(function ManageTableHeaderCell({
+  column,
+  sortColumn,
+  sortDirection,
+  onSort,
+}: {
+  column: TableColumn;
+  sortColumn: string | null;
+  sortDirection: SortDirection;
+  onSort: (column: string) => void;
+}) {
+  const handleSort = useCallback(() => onSort(column.key), [column.key, onSort]);
+  const active = sortColumn === column.key && sortDirection !== 'default';
+  const icon = active
+    ? (sortDirection === 'asc' ? MANAGE_ICONS.sortUp : MANAGE_ICONS.sortDown)
+    : MANAGE_ICONS.sort;
+
+  return (
+    <th className="ms-sortable-heading" onClick={handleSort}>
+      {column.definition.label}{' '}
+      <FontAwesomeIcon icon={icon} className={`ms-sort-icon ${active ? 'active' : ''}`} />
+    </th>
+  );
+});
+
+const ManageTableRow = memo(function ManageTableRow({
+  row,
+  columns,
+  readOnly,
+  noDelete,
+  renderCell,
+  onEdit,
+  onDelete,
+  virtualIndex,
+  measureElement,
+}: {
+  row: Row;
+  columns: readonly TableColumn[];
+  readOnly: boolean;
+  noDelete: boolean;
+  renderCell: CellRenderer;
+  onEdit: (row: Row) => void;
+  onDelete: (row: Row) => void;
+  virtualIndex?: number;
+  measureElement?: (node: HTMLTableRowElement | null) => void;
+}) {
+  const handleEdit = useCallback(() => onEdit(row), [onEdit, row]);
+  const handleDelete = useCallback(() => onDelete(row), [onDelete, row]);
+  const virtual = virtualIndex !== undefined;
+
+  return (
+    <tr
+      ref={virtual ? measureElement : undefined}
+      data-index={virtualIndex}
+      className={virtual ? 'ms-virtual-row' : undefined}
+    >
+      {columns.map((column) => (
+        <td key={column.key}>{renderCell(column.key, column.definition, row)}</td>
+      ))}
+      {!readOnly && (
+        <td className="ms-actions-cell">
+          <div className="ms-row-actions">
+            <button type="button" className="ms-row-btn" title="Edit" onClick={handleEdit}>
+              <FontAwesomeIcon icon={MANAGE_ICONS.pen} />
+            </button>
+            {!noDelete && (
+              <button type="button" className="ms-row-btn danger" title="Delete" onClick={handleDelete}>
+                <FontAwesomeIcon icon={MANAGE_ICONS.trash} />
+              </button>
+            )}
+          </div>
+        </td>
+      )}
+    </tr>
+  );
+});
+
+function ManageBoardTable({
+  rows,
+  columns,
+  primaryKey,
+  readOnly,
+  noDelete,
+  sortColumn,
+  sortDirection,
+  renderCell,
+  onSort,
+  onEdit,
+  onDelete,
+}: {
+  rows: Row[];
+  columns: readonly TableColumn[];
+  primaryKey: string;
+  readOnly: boolean;
+  noDelete: boolean;
+  sortColumn: string | null;
+  sortDirection: SortDirection;
+  renderCell: CellRenderer;
+  onSort: (column: string) => void;
+  onEdit: (row: Row) => void;
+  onDelete: (row: Row) => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualized = rows.length > VIRTUALIZATION_THRESHOLD;
+  const getItemKey = useCallback(
+    (index: number) => String(rows[index]?.[primaryKey] ?? index),
+    [primaryKey, rows]
+  );
+  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLTableRowElement>({
+    count: virtualized ? rows.length : 0,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: estimateBoardRowHeight,
+    getItemKey,
+    overscan: VIRTUAL_OVERSCAN,
+  });
+  const virtualRows = virtualized ? rowVirtualizer.getVirtualItems() : [];
+  const firstVirtualRow = virtualRows[0];
+  const lastVirtualRow = virtualRows[virtualRows.length - 1];
+  const topSpacerHeight = firstVirtualRow?.start ?? 0;
+  const bottomSpacerHeight = lastVirtualRow
+    ? Math.max(0, rowVirtualizer.getTotalSize() - lastVirtualRow.end)
+    : 0;
+  const columnCount = columns.length + (readOnly ? 0 : 1);
+
+  return (
+    <div
+      ref={scrollRef}
+      className={`ms-board-table-wrap ${virtualized ? 'is-virtualized' : ''}`}
+      data-virtualized={virtualized ? 'true' : 'false'}
+    >
+      <table className={`ms-board-table ${virtualized ? 'is-virtualized' : ''}`}>
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <ManageTableHeaderCell
+                key={column.key}
+                column={column}
+                sortColumn={sortColumn}
+                sortDirection={sortDirection}
+                onSort={onSort}
+              />
+            ))}
+            {!readOnly && <th className="ms-actions-heading" />}
+          </tr>
+        </thead>
+        <tbody>
+          {virtualized ? (
+            <>
+              {topSpacerHeight > 0 && (
+                <tr className="ms-virtual-spacer" aria-hidden="true">
+                  <td colSpan={columnCount} style={{ height: topSpacerHeight }} />
+                </tr>
+              )}
+              {virtualRows.map((virtualRow) => {
+                const row = rows[virtualRow.index];
+                return (
+                  <ManageTableRow
+                    key={String(row[primaryKey] ?? virtualRow.key)}
+                    row={row}
+                    columns={columns}
+                    readOnly={readOnly}
+                    noDelete={noDelete}
+                    renderCell={renderCell}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                    virtualIndex={virtualRow.index}
+                    measureElement={rowVirtualizer.measureElement}
+                  />
+                );
+              })}
+              {bottomSpacerHeight > 0 && (
+                <tr className="ms-virtual-spacer" aria-hidden="true">
+                  <td colSpan={columnCount} style={{ height: bottomSpacerHeight }} />
+                </tr>
+              )}
+            </>
+          ) : (
+            rows.map((row, index) => (
+              <ManageTableRow
+                key={String(row[primaryKey] ?? index)}
+                row={row}
+                columns={columns}
+                readOnly={readOnly}
+                noDelete={noDelete}
+                renderCell={renderCell}
+                onEdit={onEdit}
+                onDelete={onDelete}
+              />
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 interface ToastMsg { id: number; message: string; type: 'success' | 'error'; show: boolean; }
 
 export default function ManageBoard({
-  permLevel, groups, title, viewingAs,
-}: { permLevel: number; groups: Groups; title?: string; viewingAs?: ViewAsState | null }) {
+  permLevel, groups, title, viewingAs, timezoneMode = 'BST',
+}: { permLevel: number; groups: Groups; title?: string; viewingAs?: ViewAsState | null; timezoneMode?: SiteTimezoneMode }) {
   const supabase = useMemo(() => createClient(), []);
 
   const allBoards = useMemo(() => {
@@ -72,12 +307,16 @@ export default function ManageBoard({
 
   const [currentTable, setCurrentTable] = useState<string | null>(allBoards[0]?.[0] ?? null);
   const cfg: BoardConfig | null = currentTable ? allBoards.find(([k]) => k === currentTable)?.[1] ?? null : null;
+  const tableColumns = useMemo<TableColumn[]>(
+    () => cfg ? Object.entries(cfg.columns).map(([key, definition]) => ({ key, definition })) : [],
+    [cfg]
+  );
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortState, setSortState] = useState<{ col: string | null; dir: 'default' | 'asc' | 'desc' }>({ col: null, dir: 'default' });
+  const [sortState, setSortState] = useState<{ col: string | null; dir: SortDirection }>({ col: null, dir: 'default' });
   const [directory, setDirectory] = useState<Record<string, string>>({});
   const [contentPhase, setContentPhase] = useState<'visible' | 'leaving' | 'entering'>('visible');
 
@@ -199,14 +438,14 @@ export default function ManageBoard({
     return sortState.dir === 'desc' ? sorted.reverse() : sorted;
   }, [filteredRows, sortState, cfg]);
 
-  const toggleSort = (col: string) => {
+  const toggleSort = useCallback((col: string) => {
     setSortState((s) => {
       if (s.col !== col) return { col, dir: 'asc' };
       if (s.dir === 'asc') return { col, dir: 'desc' };
       if (s.dir === 'desc') return { col: null, dir: 'default' };
       return { col, dir: 'asc' };
     });
-  };
+  }, []);
 
   // ── record save/delete ──
   const saveRecord = async (data: Record<string, unknown>, isEdit: boolean, pk: unknown) => {
@@ -273,51 +512,25 @@ export default function ManageBoard({
   };
 
   // ── cell formatting ──
-  function displayValueFor(def: ColumnDef, value: any) {
-    if (def.resolveId) {
-      const resolved = directory[value];
-      if (resolved) return { text: resolved, unresolved: false };
-      return { text: value, unresolved: value !== null && value !== undefined && value !== '' };
-    }
-    return { text: value, unresolved: false };
-  }
-
-  function formatStaffRosterJson(raw: any) {
-    let parsed: any;
-    try { parsed = typeof raw === 'string' ? JSON.parse(raw) : raw; }
-    catch { return <span title={String(raw)}>{truncate(String(raw), 40)}</span>; }
-    const lines: React.ReactNode[] = [];
-    if (Array.isArray(parsed)) {
-      parsed.forEach((entry, i) => {
-        if (entry && typeof entry === 'object') {
-          const role = entry.role || entry.position || 'Staff';
-          const name = entry.name || entry.discord || entry.display_name || entry.discordName || '—';
-          lines.push(<div className="ms-json-line" key={i}><b>{role}:</b> {name}</div>);
-        } else {
-          lines.push(<div className="ms-json-line" key={i}>{String(entry)}</div>);
-        }
-      });
-    } else if (parsed && typeof parsed === 'object') {
-      Object.entries(parsed).forEach(([role, name], i) => {
-        lines.push(<div className="ms-json-line" key={i}><b>{role}:</b> {typeof name === 'object' ? JSON.stringify(name) : String(name)}</div>);
-      });
-    }
-    if (lines.length === 0) return <span style={{ color: 'rgba(255,255,255,.25)' }}>—</span>;
-    return <div className="ms-json-summary">{lines}</div>;
-  }
-
-  function formatCellFor(col: string, def: ColumnDef, row: Row) {
-    const { text: value, unresolved } = displayValueFor(def, row[col]);
+  const formatCellFor = useCallback<CellRenderer>((col, def, row) => {
+    const rawValue = row[col];
+    const resolvedValue = def.resolveId ? directory[rawValue] : undefined;
+    const value = resolvedValue ?? rawValue;
+    const unresolved = !!def.resolveId
+      && !resolvedValue
+      && rawValue !== null
+      && rawValue !== undefined
+      && rawValue !== '';
     if (unresolved) {
       return <span className="ms-unresolved-id" title="No matching profile/archived record found">{String(value)}</span>;
     }
     if (def.type === 'discord_avatar') {
-      if (!value) return <span style={{ color: 'rgba(255,255,255,.25)' }}>—</span>;
+      if (!value) return <span className="ms-empty-value">—</span>;
       // eslint-disable-next-line @next/next/no-img-element
-      return <img className="ms-avatar-thumb" src={value} alt="Avatar" onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')} />;
+      return <img className="ms-avatar-thumb" src={value} alt="Avatar" onError={hideBrokenImage} />;
     }
     if (value === null || value === undefined || value === '') {
-      return <span style={{ color: 'rgba(255,255,255,.25)' }}>—</span>;
+      return <span className="ms-empty-value">—</span>;
     }
     switch (def.type) {
       case 'bool':
@@ -335,15 +548,23 @@ export default function ManageBoard({
       default:
         return String(value);
     }
-  }
+  }, [directory]);
+
+  const openRecordEditor = useCallback((row: Row) => {
+    setRecordModal({ open: true, row });
+  }, []);
+
+  const requestRecordDelete = useCallback((row: Row) => {
+    setConfirmDeleteRow(row);
+  }, []);
 
   // ── record modal field builder ──
-  function fieldEditableNow(def: ColumnDef, isEdit: boolean) {
+  const fieldEditableNow = useCallback((def: ColumnDef, isEdit: boolean) => {
     if (isEdit && def.editableOnUpdate === false) return false;
     if (!isEdit && def.editableOnCreate === false) return false;
     if (def.minLevel && permLevel < def.minLevel) return false;
     return true;
-  }
+  }, [permLevel]);
 
   return (
     <>
@@ -471,47 +692,19 @@ export default function ManageBoard({
                     })}
                   </div>
                 ) : (
-                  <div className="ms-board-table-wrap">
-                    <table className="ms-board-table">
-                      <thead>
-                        <tr>
-                          {Object.entries(cfg.columns).map(([col, def]) => {
-                            const active = sortState.col === col && sortState.dir !== 'default';
-                            const icon = active ? (sortState.dir === 'asc' ? MANAGE_ICONS.sortUp : MANAGE_ICONS.sortDown) : MANAGE_ICONS.sort;
-                            return (
-                              <th key={col} onClick={() => toggleSort(col)} style={{ cursor: 'pointer', userSelect: 'none' }}>
-                                {def.label} <FontAwesomeIcon icon={icon} style={{ opacity: active ? 0.9 : 0.3, marginLeft: 4 }} />
-                              </th>
-                            );
-                          })}
-                          {!cfg.readOnly && <th style={{ width: 80 }} />}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sortedRows.map((row, i) => (
-                          <tr key={String(row[cfg.primaryKey])} style={{ animationDelay: `${Math.min(i * 25, 300)}ms` }}>
-                            {Object.entries(cfg.columns).map(([col, def]) => (
-                              <td key={col}>{formatCellFor(col, def, row)}</td>
-                            ))}
-                            {!cfg.readOnly && (
-                                <td>
-                                <div className="ms-row-actions">
-                                  <button type="button" className="ms-row-btn" title="Edit" onClick={() => setRecordModal({ open: true, row })}>
-                                    <FontAwesomeIcon icon={MANAGE_ICONS.pen} />
-                                  </button>
-                                  {!cfg.noDelete && (
-                                    <button type="button" className="ms-row-btn danger" title="Delete" onClick={() => setConfirmDeleteRow(row)}>
-                                      <FontAwesomeIcon icon={MANAGE_ICONS.trash} />
-                                    </button>
-                                  )}
-                                </div>
-                              </td>
-                            )}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <ManageBoardTable
+                    rows={sortedRows}
+                    columns={tableColumns}
+                    primaryKey={cfg.primaryKey}
+                    readOnly={!!cfg.readOnly}
+                    noDelete={!!cfg.noDelete}
+                    sortColumn={sortState.col}
+                    sortDirection={sortState.dir}
+                    renderCell={formatCellFor}
+                    onSort={toggleSort}
+                    onEdit={openRecordEditor}
+                    onDelete={requestRecordDelete}
+                  />
                 )}
               </>
             )}
@@ -525,6 +718,7 @@ export default function ManageBoard({
           cfg={cfg}
           row={recordModal.row}
           permLevel={permLevel}
+          timezoneMode={timezoneMode}
           fieldEditableNow={fieldEditableNow}
           onCancel={() => setRecordModal({ open: false, row: null })}
           onSave={(data) => saveRecord(data, !!recordModal.row, recordModal.row?.[cfg.primaryKey])}
@@ -572,11 +766,12 @@ export default function ManageBoard({
 
 /* ============================= record modal ============================= */
 function RecordModal({
-  cfg, row, permLevel, fieldEditableNow, onCancel, onSave,
+  cfg, row, permLevel, timezoneMode, fieldEditableNow, onCancel, onSave,
 }: {
   cfg: BoardConfig;
   row: Row | null;
   permLevel: number;
+  timezoneMode: SiteTimezoneMode;
   fieldEditableNow: (def: ColumnDef, isEdit: boolean) => boolean;
   onCancel: () => void;
   onSave: (data: Record<string, unknown>) => void;
@@ -613,7 +808,7 @@ function RecordModal({
         </div>
         <div className="ms-modal-body">
           {Object.entries(cfg.columns).map(([col, def]) => {
-            if (col === cfg.primaryKey && isEdit) return <Field key={col} col={col} def={def} value={values[col]} locked onChange={() => {}} />;
+            if (col === cfg.primaryKey && isEdit) return <Field key={col} col={col} def={def} value={values[col]} locked timezoneMode={timezoneMode} onChange={() => {}} />;
             if (!isEdit && def.editableOnCreate === false) return null;
             const locked = !fieldEditableNow(def, isEdit);
             return (
@@ -623,6 +818,7 @@ function RecordModal({
                 def={def}
                 value={values[col]}
                 locked={locked}
+                timezoneMode={timezoneMode}
                 onChange={(v) => setValues((s) => ({ ...s, [col]: v }))}
               />
             );
@@ -637,7 +833,7 @@ function RecordModal({
   );
 }
 
-function Field({ col, def, value, locked, onChange }: { col: string; def: ColumnDef; value: unknown; locked: boolean; onChange: (v: unknown) => void }) {
+function Field({ col, def, value, locked, timezoneMode, onChange }: { col: string; def: ColumnDef; value: unknown; locked: boolean; timezoneMode: SiteTimezoneMode; onChange: (v: unknown) => void }) {
   const lockedTag = locked ? <span className="ms-locked-tag">(locked)</span> : null;
   let input: React.ReactNode;
   switch (def.type) {
@@ -670,7 +866,7 @@ function Field({ col, def, value, locked, onChange }: { col: string; def: Column
   }
   return (
     <div className={`ms-form-group ${locked ? 'locked' : ''}`}>
-      <label>{def.label}{lockedTag}</label>
+      <label>{def.label}{col === 'event_time' ? ` (${timezoneMode})` : ''}{lockedTag}</label>
       {input}
     </div>
   );

@@ -4,10 +4,13 @@
 // started_at on first load, and hand everything to the client component.
 import { redirect } from 'next/navigation';
 import { createClient } from '@/utils/supabase/server';
+import { createAdminClient } from '@/utils/supabase/admin';
 import { getCurrentUser } from '@/lib/getCurrentUser';
 import { formatRoleDisplay } from '@/lib/roles';
+import { isInternalHelperRole } from '@/lib/sessionStaffTrainees';
+import { getSiteTimezoneMode, siteWallTimeToISOString } from '@/lib/siteTimezone';
 import SessionOngoingClient from './SessionOngoingClient';
-import type { SessionOngoingRow, ViewerRole } from '@/types/session';
+import type { LiveState, SessionOngoingRow, StaffShiftRow, ViewerRole } from '@/types/session';
 
 export default async function SessionOngoingPage({
   searchParams,
@@ -19,6 +22,8 @@ export default async function SessionOngoingPage({
 
   const supabase = await createClient();
   const user = await getCurrentUser();
+  const admin = createAdminClient();
+  const timezoneMode = await getSiteTimezoneMode(supabase);
 
   const { data: sessionRow } = await supabase
     .from('session_ongoing')
@@ -32,29 +37,18 @@ export default async function SessionOngoingPage({
   let startedAt = sessionRow.started_at as string | null;
   if (!startedAt) {
     startedAt = new Date().toISOString();
-    await supabase.from('session_ongoing').update({ started_at: startedAt }).eq('session_id', sessionId);
+    await admin.from('session_ongoing').update({ started_at: startedAt }).eq('session_id', sessionId);
   }
 
-  // Overtime is measured from the *scheduled* start, not whenever the host opened
-  // the page — Europe/London so BST/GMT is handled without a manual offset table.
-  let scheduledStartIso: string | null = null;
-  if (sessionRow.session_date && sessionRow.session_time) {
-    try {
-      const dt = new Date(
-        new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' })
-          .format(new Date(`${sessionRow.session_date}T${sessionRow.session_time}`)) // rough guard, see note below
-      );
-      scheduledStartIso = Number.isNaN(dt.getTime()) ? null : dt.toISOString();
-    } catch {
-      scheduledStartIso = null;
-    }
-  }
-  // NOTE: precise London-local -> UTC conversion (handling the BST/GMT switch
-  // correctly) needs a tz library since native Date has no IANA zone constructor.
-  // Recommend `Temporal` (via a polyfill) or `date-fns-tz`'s `zonedTimeToUtc`:
-  //   scheduledStartIso = zonedTimeToUtc(`${session_date} ${session_time}`, 'Europe/London').toISOString()
+  // Overtime uses selected site mode while Supabase timestamps remain UTC.
+  const scheduledStartIso = sessionRow.session_date && sessionRow.session_time
+    ? siteWallTimeToISOString(sessionRow.session_date, sessionRow.session_time, timezoneMode)
+    : null;
 
-  const { data: staffDirectoryRows } = await supabase
+  // profiles only permits users to select their own row. This server-only,
+  // field-limited directory query therefore uses the service role after the
+  // page has authenticated the viewer above.
+  const { data: staffDirectoryRows } = await admin
     .from('staff_profiles')
     .select('id, staff_rank, profiles!inner(discord_username, discord_id)');
 
@@ -70,16 +64,43 @@ export default async function SessionOngoingPage({
   // 'Assistant' role regardless of who they actually were on the session.
   const { data: staffRows } = await supabase
     .from('session_staff')
-    .select('role, staff_name')
+    .select('staff_row_id, role, staff_name, attended, notes')
     .eq('session_id', sessionId);
+
+  const [{ data: traineeRows }, { data: driverRows }] = await Promise.all([
+    supabase
+      .from('session_trainees')
+      .select('trainee_row_id, slot_number, is_standby, trainee_roblox_username, trainee_discord, trainee_discord_id, zone, note, trainer_name, attended')
+      .eq('session_id', sessionId)
+      .order('slot_number', { ascending: true }),
+    supabase
+      .from('session_drivers')
+      .select('driver_row_id, discord_username, roblox_username, attended')
+      .eq('session_id', sessionId)
+      .order('driver_row_id', { ascending: true }),
+  ]);
 
   function findRole(code: string): string | null {
     return (staffRows ?? []).find((r) => r.role === code || r.role.startsWith(`${code},`))?.staff_name ?? null;
   }
 
+  // Staff assignments stay in session_staff throughout the session. These
+  // virtual fields are added to initialSession for the controller UI only.
   const hostName = findRole('HOST');
-  const cohostNames = ['CH_1', 'CH_2', 'CH_3', 'CH_4'].map(findRole).filter((n): n is string => !!n);
-  const assistantNames = ['AST_1', 'AST_2', 'AST_3', 'AST_4'].map(findRole).filter((n): n is string => !!n);
+  const cohostSlots = [
+    findRole('CH_1'),
+    findRole('CH_2'),
+    findRole('CH_3'),
+    findRole('CH_4'),
+  ];
+  const cohostNames = cohostSlots.filter((n): n is string => !!n);
+  const assistantSlots = [
+    findRole('AST_1'),
+    findRole('AST_2'),
+    findRole('AST_3'),
+    findRole('AST_4'),
+  ];
+  const assistantNames = assistantSlots.filter((n): n is string => !!n);
 
   // staffDirectory maps discord_username -> real Discord snowflake ID — NOT the
   // Supabase auth uuid (row.id). The "Discord ID" field next to Session Host/
@@ -95,7 +116,7 @@ export default async function SessionOngoingPage({
   const eligibleAssistant = new Set<string>();
 
   for (const row of staffDirectoryRows ?? []) {
-    const p = (row as any).profiles;
+    const p = row.profiles as unknown as { discord_username: string | null; discord_id: string | null } | null;
     const name = p?.discord_username ?? '';
     if (!name) continue;
     staffDirectory[name] = p?.discord_id ?? '';
@@ -112,7 +133,7 @@ export default async function SessionOngoingPage({
   // otherwise a not-yet-logged-in host/trainer would show a correct name but a
   // permanently blank Discord ID field, and would never appear in the host
   // dropdown's option list at all.
-  const { data: rosterRows } = await supabase
+  const { data: rosterRows } = await admin
     .from('staff_roster')
     .select('discord_id, discord_username, staff_rank')
     .eq('claimed', false);
@@ -136,12 +157,10 @@ export default async function SessionOngoingPage({
   // impersonated staff member, not the real signed-in dev — same fix as
   // /setup/page.tsx's mySessions filter. 'rank' mode has no personLabel, so
   // this falls back to the real id-based lookup exactly as before.
-  let myDisplayName: string | null = user.viewingAs?.personLabel ?? null;
-  if (!myDisplayName) {
-    for (const [name, id] of Object.entries(staffDirectory)) {
-      if (id === user.id) { myDisplayName = name; break; }
-    }
-  }
+  // effectiveUsername is already the Discord username for the real user, or
+  // the impersonated username in person-mode View As. Do not compare the
+  // Supabase auth UUID (user.id) to staffDirectory's Discord snowflake IDs.
+  const myDisplayName = user.viewingAs?.personLabel ?? user.effectiveUsername;
 
   const norm = (s: string | null | undefined) => (s ?? '').trim().toLowerCase();
   let viewerRole: ViewerRole = 'Assistant';
@@ -149,7 +168,6 @@ export default async function SessionOngoingPage({
     if (norm(hostName) === norm(myDisplayName)) viewerRole = 'Host';
     else if (cohostNames.some((c) => norm(c) === norm(myDisplayName))) viewerRole = 'Co-Host';
   }
-  myDisplayName ??= user.effectiveUsername;
 
   // ── SECURITY: only host/co-hosts/assistants on THIS session (or the real
   // signed-in admin, for support access) may view or edit the panel. Without
@@ -168,26 +186,95 @@ export default async function SessionOngoingPage({
     redirect('/dashboard?error=' + encodeURIComponent('You are not assigned to this session.'));
   }
 
+  // Hydrate the controller's legacy flat UI shape from the normalized tables
+  // that current_db.sql actually contains. live_state remains the realtime
+  // transport for transient controller state, while these child tables remain
+  // the durable source used by conclude_session().
+  const traineeFields: Record<string, unknown> = {};
+  const liveTrainees: NonNullable<LiveState['trainees']> = {};
+  const attendanceBySlot = Array.from({ length: sessionRow.num_slots }, () => '0');
+  const standbySlots: number[] = [];
+  for (const trainee of traineeRows ?? []) {
+    const slot = Number(trainee.slot_number);
+    if (!Number.isInteger(slot) || slot < 1) continue;
+    if (!trainee.is_standby && slot > sessionRow.num_slots) continue;
+    if (trainee.is_standby) standbySlots.push(slot);
+    const rowKey = String(slot - 1);
+    const zone = trainee.zone == null ? '' : `Zone ${trainee.zone}`;
+    traineeFields[`trainee_${slot}_name`] = trainee.trainee_roblox_username;
+    traineeFields[`trainee_${slot}_discord`] = trainee.trainee_discord;
+    traineeFields[`trainee_${slot}_discord_id`] = trainee.trainee_discord_id == null ? null : String(trainee.trainee_discord_id);
+    traineeFields[`trainee_${slot}_zone`] = trainee.zone;
+    traineeFields[`trainee_${slot}_note`] = trainee.note;
+    traineeFields[`trainee_${slot}_trainer_name`] = trainee.trainer_name;
+    if (!trainee.is_standby) attendanceBySlot[slot - 1] = trainee.attended ? '1' : '0';
+    liveTrainees[rowKey] = {
+      discord: trainee.trainee_discord ?? '',
+      discordId: trainee.trainee_discord_id == null ? '' : String(trainee.trainee_discord_id),
+      roblox: trainee.trainee_roblox_username ?? '',
+      zone,
+      notes: trainee.note ?? '',
+      trainerName: trainee.trainer_name ?? '',
+      attended: Boolean(trainee.attended),
+    };
+  }
+
+  function shiftRole(role: string): StaffShiftRow['role'] {
+    if (isInternalHelperRole(role)) return 'Internal Helper';
+    if (role.startsWith('CH_')) return 'Co-Host';
+    if (role.startsWith('AST_1')) return 'Main AST';
+    return 'Assistant';
+  }
+
+  const durableStaffShift: StaffShiftRow[] = (staffRows ?? [])
+    .filter((row) => !(row.role === 'HOST' || row.role.startsWith('HOST,')))
+    .map((row) => ({
+      sourceRowId: row.staff_row_id,
+      role: shiftRole(row.role),
+      discord: row.staff_name,
+      notes: row.notes ?? '',
+      attended: Boolean(row.attended),
+    }));
+
+  const durableDrivers = (driverRows ?? []).map((row) => ({
+    sourceRowId: row.driver_row_id,
+    discord: row.discord_username ?? '',
+    roblox: row.roblox_username ?? '',
+    attended: Boolean(row.attended),
+  }));
+
+  const initialLiveState: LiveState = {
+    ...((sessionRow.live_state as LiveState | null) ?? {}),
+    sessionHost: hostName,
+    trainees: liveTrainees,
+    staffShift: durableStaffShift,
+    drivers: durableDrivers,
+  };
+
   return (
     <SessionOngoingClient
       initialSession={{
         ...sessionRow,
+        ...traineeFields,
         started_at: startedAt,
-        // merged in from session_staff — see comment above
-        host: hostName,
-        co_host1: cohostNames[0] ?? null,
-        co_host2: cohostNames[1] ?? null,
-        co_host3: cohostNames[2] ?? null,
-        'co_host4/supervisor': cohostNames[3] ?? null,
-        assistant_1: assistantNames[0] ?? null,
-        assistant_2: assistantNames[1] ?? null,
-        assistant_3: assistantNames[2] ?? null,
-        assistant_4: assistantNames[3] ?? null,
+        live_state: initialLiveState,
+        trainee_attendance: attendanceBySlot.join(','),
+        host: hostName ?? '',
+        co_host1: cohostSlots[0] || null,
+        co_host2: cohostSlots[1] || null,
+        co_host3: cohostSlots[2] || null,
+        co_host4_supervisor: cohostSlots[3] || null,
+        assistant_1: assistantSlots[0] || null,
+        assistant_2: assistantSlots[1] || null,
+        assistant_3: assistantSlots[2] || null,
+        assistant_4: assistantSlots[3] || null,
       } as SessionOngoingRow}
       staffDirectory={staffDirectory}
       eligibleHosts={[...eligibleHost]}
       eligibleStaff={{ 'Co-Host': [...eligibleCohost], Assistant: [...eligibleAssistant] }}
       scheduledStartIso={scheduledStartIso}
+      standbySlots={standbySlots}
+      timezoneMode={timezoneMode}
       viewerRole={viewerRole}
       myDisplayName={myDisplayName}
       username={myDisplayName}

@@ -11,76 +11,79 @@ export interface ProfileSuggestion {
   avatarUrl: string | null;
 }
 
-/**
- * Searches profiles only — for the "who is this Internal Helper training"
- * picker, where the trainee is being assessed as staff and should be a real
- * signed-in account, not the known_trainees cache.
- */
+const PROFILE_SELECT = 'id, discord_id, discord_username, discord_avatar_url, roblox_username';
+const TRAINEE_PROFILE_SELECT = 'discord_id, discord_username, discord_avatar_url, roblox_username';
+const KNOWN_TRAINEE_SELECT = 'discord_id, discord_username, roblox_username';
+
+function uniqueRows<T extends { discord_id: string | null; discord_username: string }>(rows: T[]): T[] {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = row.discord_id || row.discord_username.toLocaleLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** Search signed-in profiles for the Internal Helper trainee picker. */
 export async function searchProfiles(query: string): Promise<ProfileSuggestion[]> {
   const q = query.trim();
   if (q.length < 2) return [];
 
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('id, discord_id, discord_username, discord_avatar_url, roblox_username')
-    .or(`discord_username.ilike.%${q}%,roblox_username.ilike.%${q}%`)
-    .limit(8);
+  const pattern = `%${q}%`;
+  // Keep values in structured filter arguments; never interpolate user text
+  // into an .or(...) expression string.
+  const [discordResult, robloxResult] = await Promise.all([
+    supabase.from('profiles').select(PROFILE_SELECT).ilike('discord_username', pattern).limit(8),
+    supabase.from('profiles').select(PROFILE_SELECT).ilike('roblox_username', pattern).limit(8),
+  ]);
+  if (discordResult.error || robloxResult.error) return [];
 
-  if (error || !data) return [];
-
-  return data.map((row) => ({
-    id: row.id,
-    discordUsername: row.discord_username,
-    discordId: row.discord_id,
-    robloxUsername: row.roblox_username,
-    avatarUrl: row.discord_avatar_url,
-  }));
+  return uniqueRows([...(discordResult.data ?? []), ...(robloxResult.data ?? [])])
+    .slice(0, 8)
+    .map((row) => ({
+      id: row.id,
+      discordUsername: row.discord_username,
+      discordId: row.discord_id,
+      robloxUsername: row.roblox_username,
+      avatarUrl: row.discord_avatar_url,
+    }));
 }
 
 export interface TraineeSuggestion {
-  source: 'profile' | 'known'; // 'profile' = has actually signed into the site; 'known' = only ever seen in a past session
+  source: 'profile' | 'known';
   discordId: string | null;
   discordUsername: string;
   robloxUsername: string | null;
   avatarUrl: string | null;
 }
 
-/**
- * Trainee autocomplete: checks `profiles` first (people who've actually signed
- * in), then `known_trainees` (people only ever seen typed into a past session's
- * roster — no account required). Deliberately allowed to return the same
- * person from both sources; not de-duped against each other.
- */
+/** Trainee autocomplete across profiles and the known-trainee cache. */
 export async function searchTraineeCandidates(query: string): Promise<TraineeSuggestion[]> {
   const q = query.trim();
   if (q.length < 2) return [];
 
   const supabase = await createClient();
-
-  const [{ data: profileRows }, { data: knownRows }] = await Promise.all([
-    supabase
-      .from('profiles')
-      .select('discord_id, discord_username, discord_avatar_url, roblox_username')
-      .or(`discord_username.ilike.%${q}%,roblox_username.ilike.%${q}%`)
-      .limit(8),
-    supabase
-      .from('known_trainees')
-      .select('discord_id, discord_username, roblox_username')
-      .or(`discord_username.ilike.%${q}%,roblox_username.ilike.%${q}%`)
-      .order('last_seen_at', { ascending: false })
-      .limit(8), // now safe to trust the limit directly — known_trainees is deduped at write time
+  const pattern = `%${q}%`;
+  const [profilesByDiscord, profilesByRoblox, knownByDiscord, knownByRoblox] = await Promise.all([
+    supabase.from('profiles').select(TRAINEE_PROFILE_SELECT).ilike('discord_username', pattern).limit(8),
+    supabase.from('profiles').select(TRAINEE_PROFILE_SELECT).ilike('roblox_username', pattern).limit(8),
+    supabase.from('known_trainees').select(KNOWN_TRAINEE_SELECT).ilike('discord_username', pattern).order('last_seen_at', { ascending: false }).limit(8),
+    supabase.from('known_trainees').select(KNOWN_TRAINEE_SELECT).ilike('roblox_username', pattern).order('last_seen_at', { ascending: false }).limit(8),
   ]);
 
-  const results: TraineeSuggestion[] = (profileRows ?? []).map((row) => ({
-    source: 'profile' as const,
+  const profileRows = uniqueRows([...(profilesByDiscord.data ?? []), ...(profilesByRoblox.data ?? [])]).slice(0, 8);
+  const knownRows = uniqueRows([...(knownByDiscord.data ?? []), ...(knownByRoblox.data ?? [])]).slice(0, 8);
+  const results: TraineeSuggestion[] = profileRows.map((row) => ({
+    source: 'profile',
     discordId: row.discord_id,
     discordUsername: row.discord_username,
     robloxUsername: row.roblox_username,
     avatarUrl: row.discord_avatar_url,
   }));
 
-  for (const row of knownRows ?? []) {
+  for (const row of knownRows) {
     results.push({
       source: 'known',
       discordId: row.discord_id,

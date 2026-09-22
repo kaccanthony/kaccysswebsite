@@ -149,12 +149,28 @@ export async function searchKnownTrainees(query: string): Promise<KnownTraineeMa
   if (trimmed.length < 2) return []; // avoid a flood of matches on 1 character
 
   const supabase = await createClient();
-  const { data } = await supabase
-    .from('known_trainees')
-    .select('discord_id, discord_username, roblox_username')
-    .or(`discord_username.ilike.%${trimmed}%,roblox_username.ilike.%${trimmed}%`)
-    .order('last_seen_at', { ascending: false })
-    .limit(8);
+  const pattern = `%${trimmed}%`;
+  const [byDiscord, byRoblox] = await Promise.all([
+    supabase
+      .from('known_trainees')
+      .select('discord_id, discord_username, roblox_username')
+      .ilike('discord_username', pattern)
+      .order('last_seen_at', { ascending: false })
+      .limit(8),
+    supabase
+      .from('known_trainees')
+      .select('discord_id, discord_username, roblox_username')
+      .ilike('roblox_username', pattern)
+      .order('last_seen_at', { ascending: false })
+      .limit(8),
+  ]);
+  const seen = new Set<string>();
+  const data = [...(byDiscord.data ?? []), ...(byRoblox.data ?? [])].filter((row) => {
+    const key = row.discord_id || row.discord_username.toLocaleLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 8);
 
   return (data ?? []).map((d) => ({
     discordId: d.discord_id,

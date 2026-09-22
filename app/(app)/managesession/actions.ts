@@ -5,6 +5,12 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { getCurrentUser } from '@/lib/getCurrentUser';
 import { createClient } from '@/utils/supabase/server';
+import { buildStaffRowsFromForm, buildTraineeRowsFromForm } from '@/lib/sessionStaffTrainees';
+import {
+  canManageSiteTimezone,
+  parseSiteTimezone,
+  SITE_TIMEZONE_SETTING_KEY,
+} from '@/lib/siteTimezone';
 
 function fail(message: string): never {
   redirect(`/managesession?error=${encodeURIComponent(message)}`);
@@ -66,57 +72,24 @@ export async function deleteSession(formData: FormData) {
   redirect('/managesession?success=' + encodeURIComponent('Session deleted.'));
 }
 
-// ── Primary staff roles, per your new convention: HOST / CH_1-4 / AST_1-4.
-// CH_3 and CH_4 each get an optional ", IH" suffix from their checkbox. ──
-const PRIMARY_ROLES = [
-  { role: 'HOST', field: 'host', ihField: null },
-  { role: 'CH_1', field: 'co_host1', ihField: null },
-  { role: 'CH_2', field: 'co_host2', ihField: null },
-  { role: 'CH_3', field: 'co_host3', ihField: 'co_host3_ih' },
-  { role: 'CH_4', field: 'co_host4_supervisor', ihField: 'co_host4_ih' },
-  { role: 'AST_1', field: 'assistant_1', ihField: null },
-  { role: 'AST_2', field: 'assistant_2', ihField: null },
-  { role: 'AST_3', field: 'assistant_3', ihField: null },
-  { role: 'AST_4', field: 'assistant_4', ihField: null },
-] as const;
-
+// Staff normalization is shared with the final Setup Session save so both
+// entry points persist identical role codes and Internal Helper placement.
 export async function saveSession(formData: FormData) {
   const user = await getCurrentUser();
   if (user.permLevel < 10) fail('You do not have permission to manage sessions.');
 
   const action = formData.get('action') as string; // 'add' | 'edit'
   const numSlots = parseInt((formData.get('num_slots') as string) || '0', 10);
+  const reservedSlots = Math.max(0, Math.min(10, parseInt((formData.get('reserved_slots') as string) || '0', 10) || 0));
 
   // ── Primary roles ──
-  const primaryStaff = PRIMARY_ROLES.map(({ role, field, ihField }) => {
-    const name = ((formData.get(field) as string) || '').trim();
-    if (!name) return null;
-    const ih = ihField ? formData.get(ihField) === 'on' : false;
-    return { role: ih ? `${role}, IH` : role, name };
-  }).filter((r): r is { role: string; name: string } => r !== null);
-
-  // Only checked among primary slots now — the same person CAN also show up
-  // in the Additional Staff / IH list (that's the point of the IH-merge below).
-  const primaryNames = primaryStaff.map((s) => s.name);
-  if (new Set(primaryNames).size !== primaryNames.length) {
-    fail("Duplicate staff entry detected — the same person can't hold two primary roles at once.");
-  }
-
-  if (!primaryStaff.some((s) => s.role.startsWith('HOST'))) {
-    fail('A host is required.');
-  }
-
-  // ── Additional staff: repeated name+role pairs. The client should submit
-  // these as `additional_staff_name` / `additional_staff_role` (one of each
-  // per row, same index order) rather than the old single free-text field. ──
-  const additionalNames = formData.getAll('additional_staff_name') as string[];
-  const additionalRoles = formData.getAll('additional_staff_role') as string[];
-  const additionalEntries: { name: string; roleName: string }[] = [];
-  for (let i = 0; i < additionalNames.length; i++) {
-    const name = (additionalNames[i] || '').trim();
-    const roleName = (additionalRoles[i] || '').trim();
-    if (name && roleName) additionalEntries.push({ name, roleName });
-  }
+  const pendingStaffRows = (() => {
+    try {
+      return buildStaffRowsFromForm(formData, 0);
+    } catch (error) {
+      fail(error instanceof Error ? error.message : 'Invalid staff assignments.');
+    }
+  })();
 
   const sessionDate = formData.get('session_date') as string;
   if (!sessionDate) fail('Invalid or missing session date.');
@@ -180,37 +153,7 @@ export async function saveSession(formData: FormData) {
   // coming from the client). ──
   await supabase.from('session_staff').delete().eq('session_id', sessionId);
 
-  const staffRows = primaryStaff.map((s) => ({
-    session_id: sessionId,
-    role: s.role,
-    staff_name: s.name,
-    attended: false,
-    notes: null as string | null,
-  }));
-
-  for (const entry of additionalEntries) {
-    const isIH = /internal helper|^ih$/i.test(entry.roleName);
-    const matchedPrimary = isIH
-      ? staffRows.find((r) => r.staff_name.trim().toLowerCase() === entry.name.trim().toLowerCase())
-      : undefined;
-
-    if (matchedPrimary) {
-      // Someone already holding a primary role is ALSO doing IH duty —
-      // merge into their existing row instead of creating a separate one.
-      // e.g. a HOST row's role becomes "HOST, IH".
-      if (!matchedPrimary.role.includes('IH')) {
-        matchedPrimary.role = `${matchedPrimary.role}, IH`;
-      }
-    } else {
-      staffRows.push({
-        session_id: sessionId,
-        role: `Add T. ${entry.roleName}`,
-        staff_name: entry.name,
-        attended: false,
-        notes: null,
-      });
-    }
-  }
+  const staffRows = pendingStaffRows.map((row) => ({ ...row, session_id: sessionId }));
 
   if (staffRows.length > 0) {
     const { error: staffError } = await supabase.from('session_staff').insert(staffRows);
@@ -220,26 +163,7 @@ export async function saveSession(formData: FormData) {
   // ── Replace session_trainees for this session entirely ──
   await supabase.from('session_trainees').delete().eq('session_id', sessionId);
 
-  const traineeRows: Record<string, unknown>[] = [];
-  for (let t = 1; t <= numSlots; t++) {
-    const roblox = (formData.get(`trainee_${t}_roblox`) as string) || '';
-    const discord = (formData.get(`trainee_${t}_discord`) as string) || '';
-    if (!roblox && !discord) continue; // empty slot — skip rather than insert a blank row
-
-    const zoneRaw = formData.get(`trainee_${t}_zone`) as string;
-    traineeRows.push({
-      session_id: sessionId,
-      slot_number: t,
-      is_standby: formData.get(`trainee_${t}_standby`) === 'on',
-      trainee_roblox_username: roblox || null,
-      trainee_discord: discord || null,
-      trainee_discord_id: (formData.get(`trainee_${t}_discord_id`) as string) || null,
-      zone: zoneRaw ? parseInt(zoneRaw, 10) : null,
-      note: (formData.get(`trainee_${t}_note`) as string) || null,
-      trainer_name: (formData.get(`trainee_${t}_trainer`) as string) || null,
-      attended: false,
-    });
-  }
+  const traineeRows = buildTraineeRowsFromForm(formData, sessionId, numSlots, reservedSlots);
 
   if (traineeRows.length > 0) {
     const { error: traineeError } = await supabase.from('session_trainees').insert(traineeRows);
@@ -269,4 +193,32 @@ export async function saveSession(formData: FormData) {
 
   revalidatePath('/managesession');
   redirect('/managesession?success=' + encodeURIComponent(msg));
+}
+
+export async function updateSiteTimezone(formData: FormData) {
+  const user = await getCurrentUser();
+  if (!canManageSiteTimezone(user)) fail('You do not have permission to change site timezone.');
+
+  const requestedValue = formData.get('timezone_mode');
+  if (requestedValue !== 'GMT' && requestedValue !== 'BST') fail('Invalid timezone mode.');
+  const timezoneMode = parseSiteTimezone(requestedValue);
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('site_settings')
+    .update({
+      setting_value: timezoneMode,
+      updated_at: new Date().toISOString(),
+      updated_by: user.id,
+    })
+    .eq('setting_key', SITE_TIMEZONE_SETTING_KEY)
+    .select('setting_value')
+    .single();
+
+  if (error || !data) fail(`Could not update timezone. Run database/site_timezone.sql first. ${error?.message ?? 'Setting row was not found.'}`);
+
+  revalidatePath('/', 'layout');
+  revalidatePath('/managesession');
+  revalidatePath('/upcomingsesh');
+  revalidatePath('/setupsesh');
+  redirect(`/managesession?success=${encodeURIComponent(`Site timezone changed to ${timezoneMode}.`)}`);
 }

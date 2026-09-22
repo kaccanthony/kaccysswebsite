@@ -5,6 +5,7 @@ import SetupSessionInteractive from './SetupSessionInteractive';
 import type { SessionRow, StaffOption } from '../managesession/ManageSessionInteractive';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
+import { currentSiteTimeParts, getSiteTimezoneMode } from '@/lib/siteTimezone';
 import './setupsesh.css';
 
 export const metadata = { title: 'Setup Session' };
@@ -17,8 +18,9 @@ export default async function SetupSessionPage({
   const user = await getCurrentUser();
   const params = await searchParams;
   const supabase = await createClient();
+  const timezoneMode = await getSiteTimezoneMode(supabase);
 
-  const todayBST = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  const { date: todayBST } = currentSiteTimeParts(timezoneMode);
 
   const { data: sessions } = await supabase
     .from('session_upcoming')
@@ -121,6 +123,7 @@ export default async function SetupSessionPage({
       <SetupSessionInteractive
         sessions={mySessions}
         staff={staff}
+        timezoneMode={timezoneMode}
         initialSelectedId={params.session_id ? parseInt(params.session_id, 10) : undefined}
       />
     </>

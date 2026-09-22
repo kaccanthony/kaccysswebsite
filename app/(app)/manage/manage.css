@@ -42,10 +42,18 @@
 
 /* ── Monday.com-style board (table mode) ── */
 .ms-board-table-wrap { border-radius: 14px; border: 1px solid rgba(255,255,255,.1); overflow: hidden; overflow-x: auto; background: rgba(255,255,255,.03); }
+.ms-board-table-wrap.is-virtualized { max-height: min(72vh, 760px); overflow: auto; contain: layout paint style; scrollbar-gutter: stable; overscroll-behavior: contain; }
 .ms-board-table { border-collapse: collapse; width: 100%; font-size: .82rem; }
-.ms-board-table thead th { position: sticky; top: 0; background: #141414; text-align: left; padding: 11px 14px; font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: rgba(255,255,255,.45); border-bottom: 1px solid rgba(255,255,255,.1); white-space: nowrap; }
+.ms-board-table thead th { position: sticky; top: 0; z-index: 2; background: #141414; text-align: left; padding: 11px 14px; font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; color: rgba(255,255,255,.45); border-bottom: 1px solid rgba(255,255,255,.1); white-space: nowrap; will-change: transform; transform: translateZ(0); }
+.ms-sortable-heading { cursor: pointer; user-select: none; }
+.ms-sort-icon { opacity: .3; margin-left: 4px; }
+.ms-sort-icon.active { opacity: .9; }
+.ms-actions-heading, .ms-actions-cell { width: 80px; }
 .ms-board-table tbody td { padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,.06); white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 .ms-board-table tbody tr { transition: background .12s; animation: msRowIn .28s cubic-bezier(.2,.7,.3,1) backwards; }
+.ms-board-table tbody tr.ms-virtual-row { animation: none; }
+.ms-board-table tbody tr.ms-virtual-spacer { animation: none; pointer-events: none; }
+.ms-board-table tbody tr.ms-virtual-spacer td { padding: 0; border: 0; }
 .ms-board-table tbody tr:hover { background: rgba(124,196,255,.05); }
 .ms-row-actions { display: flex; gap: 6px; }
 .ms-row-btn { width: 28px; height: 28px; border-radius: 7px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); color: rgba(255,255,255,.65); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: .7rem; transition: transform .15s ease, background .15s ease, color .15s ease; }
@@ -65,6 +73,7 @@
 .ms-pill-5 { background: rgba(255,214,102,.18); color: #ffe08c; }
 .ms-bool-true { color: #4ade80; }
 .ms-bool-false { color: rgba(255,255,255,.3); }
+.ms-empty-value { color: rgba(255,255,255,.25); }
 
 /* ── JSON-formatted cell content ── */
 .ms-json-summary { display: flex; flex-direction: column; gap: 4px; font-size: .76rem; white-space: normal; }

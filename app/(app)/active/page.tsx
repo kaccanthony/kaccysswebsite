@@ -26,6 +26,8 @@ export default async function ActiveSessionPage({
   const sessionIdNum = session_id ? parseInt(session_id, 10) : undefined;
   const session = await fetchSession(supabase, sessionIdNum);
   const rows = session ? buildRowsFromSession(session) : [];
+  const persistedChange = session?.last_updated ?? session?.started_at;
+  const initialLastChangeAt = persistedChange ? new Date(String(persistedChange)).getTime() : null;
 
   return (
     <main>
@@ -63,7 +65,11 @@ export default async function ActiveSessionPage({
                   <th>Completed</th>
                 </tr>
               </thead>
-              <PublicRowsTable sessionId={session.session_id} initialRows={rows} />
+              <PublicRowsTable
+                sessionId={session.session_id}
+                initialRows={rows}
+                initialLastChangeAt={Number.isFinite(initialLastChangeAt) ? initialLastChangeAt : null}
+              />
             </table>
           </div>
         </section>

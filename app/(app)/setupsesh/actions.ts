@@ -8,7 +8,7 @@ import { createClient } from '@/utils/supabase/server';
 import { writeStaffAndTrainees, upsertKnownTrainee } from '@/lib/sessionStaffTrainees';
 
 function fail(sessionId: number, message: string): never {
-  redirect(`/setup?session_id=${sessionId}&error=${encodeURIComponent(message)}`);
+  redirect(`/setupsesh?session_id=${sessionId}&error=${encodeURIComponent(message)}`);
 }
 
 /**
@@ -28,12 +28,13 @@ export async function confirmAndStartSession(formData: FormData) {
   if (!sessionId) fail(0, 'Missing session ID.');
 
   const numSlots = parseInt((formData.get('num_slots') as string) || '0', 10);
+  const reservedSlots = Math.max(0, Math.min(10, parseInt((formData.get('reserved_slots') as string) || '0', 10) || 0));
 
   const supabase = await createClient();
 
   let staffRows, traineeRows;
   try {
-    ({ staffRows, traineeRows } = await writeStaffAndTrainees(supabase, sessionId, formData, numSlots));
+    ({ staffRows, traineeRows } = await writeStaffAndTrainees(supabase, sessionId, formData, numSlots, reservedSlots));
   } catch (e) {
     fail(sessionId, e instanceof Error ? e.message : 'Could not save staff/trainee assignments.');
   }
@@ -53,7 +54,10 @@ export async function confirmAndStartSession(formData: FormData) {
   const { error } = await supabase.rpc('start_session', { p_session_id: sessionId });
   if (error) fail(sessionId, error.message);
 
-  revalidatePath('/setup');
+  revalidatePath('/setupsesh');
+  revalidatePath('/sessionongoing');
   revalidatePath('/active');
-  redirect('/active?session_id=' + sessionId);
+  // Refresh shared profile popup assignment data.
+  revalidatePath('/', 'layout');
+  redirect('/sessionongoing?session_id=' + sessionId);
 }

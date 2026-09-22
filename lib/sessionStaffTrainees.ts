@@ -35,6 +35,10 @@ export interface StaffRowInput {
   notes: string | null;
 }
 
+export function isInternalHelperRole(role: string): boolean {
+  return /\binternal helper\b|\bIH\b/i.test(role);
+}
+
 /**
  * Parses the primary role selects + repeated Additional Staff rows out of a
  * FormData into session_staff rows, applying the IH-merge rule (someone
@@ -77,13 +81,26 @@ export function buildStaffRowsFromForm(formData: FormData, sessionId: number): S
   }));
 
   for (const entry of additionalEntries) {
-    const isIH = /internal helper|^ih$/i.test(entry.roleName);
+    const isIH = isInternalHelperRole(entry.roleName);
     const matchedPrimary = isIH
-      ? staffRows.find((r) => r.staff_name.trim().toLowerCase() === entry.name.trim().toLowerCase())
+      ? staffRows.find((r) =>
+          !r.role.startsWith('Add T.')
+          && r.staff_name.trim().toLowerCase() === entry.name.trim().toLowerCase()
+        )
       : undefined;
 
     if (matchedPrimary) {
       if (!matchedPrimary.role.includes('IH')) matchedPrimary.role = `${matchedPrimary.role}, IH`;
+    } else if (isIH && !staffRows.some((row) => row.role === 'CH_4' || row.role.startsWith('CH_4,'))) {
+      // The first standalone Internal Helper occupies the legacy
+      // Co-Host 4 / Supervisor slot. Further IHs remain additional rows.
+      staffRows.push({
+        session_id: sessionId,
+        role: 'CH_4, IH',
+        staff_name: entry.name,
+        attended: false,
+        notes: null,
+      });
     } else {
       staffRows.push({
         session_id: sessionId,
@@ -111,9 +128,18 @@ export interface TraineeRowInput {
   attended: boolean;
 }
 
-export function buildTraineeRowsFromForm(formData: FormData, sessionId: number, numSlots: number): TraineeRowInput[] {
+export function buildTraineeRowsFromForm(
+  formData: FormData,
+  sessionId: number,
+  numSlots: number,
+  reservedSlots = 0
+): TraineeRowInput[] {
   const rows: TraineeRowInput[] = [];
-  for (let t = 1; t <= numSlots; t++) {
+  const safeNumSlots = Math.max(0, Math.min(10, numSlots));
+  const safeReservedSlots = Math.max(0, Math.min(10, reservedSlots));
+  const totalRows = safeNumSlots + safeReservedSlots;
+
+  for (let t = 1; t <= totalRows; t++) {
     const roblox = (formData.get(`trainee_${t}_roblox`) as string) || '';
     const discord = (formData.get(`trainee_${t}_discord`) as string) || '';
     if (!roblox && !discord) continue; // empty slot — skip rather than insert a blank row
@@ -122,7 +148,8 @@ export function buildTraineeRowsFromForm(formData: FormData, sessionId: number, 
     rows.push({
       session_id: sessionId,
       slot_number: t,
-      is_standby: formData.get(`trainee_${t}_standby`) === 'on',
+      // Capacity comes only from num_slots. Every extra row is reserved.
+      is_standby: t > safeNumSlots,
       trainee_roblox_username: roblox || null,
       trainee_discord: discord || null,
       trainee_discord_id: (formData.get(`trainee_${t}_discord_id`) as string) || null,
@@ -140,10 +167,11 @@ export async function writeStaffAndTrainees(
   supabase: SupabaseClient,
   sessionId: number,
   formData: FormData,
-  numSlots: number
+  numSlots: number,
+  reservedSlots = 0
 ): Promise<{ staffRows: StaffRowInput[]; traineeRows: TraineeRowInput[] }> {
   const staffRows = buildStaffRowsFromForm(formData, sessionId);
-  const traineeRows = buildTraineeRowsFromForm(formData, sessionId, numSlots);
+  const traineeRows = buildTraineeRowsFromForm(formData, sessionId, numSlots, reservedSlots);
 
   await supabase.from('session_staff').delete().eq('session_id', sessionId);
   if (staffRows.length > 0) {

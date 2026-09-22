@@ -1,4 +1,5 @@
 // lib/session/constants.ts
+import { formatInstantInSiteTimezone, type SiteTimezoneMode } from '@/lib/siteTimezone';
 // Straight port of the data blocks from sessionongoing.js — zone data, script
 // lines, announcement template, station list. Logic-free, so this is 1:1.
 
@@ -25,7 +26,7 @@ export const ZONE_DATA: Record<string, ZoneInfo> = {
 export const ZONES = Object.keys(ZONE_DATA);
 
 export const ZONE_MAP_IMG_URL =
-  'https://cdn.discordapp.com/attachments/1344385121075204136/1471103255022014637/attachment.gif?ex=69dc286b&is=69dad6eb&hm=328cff76bf4a3b7703ad46aebd80e999bb317d5d1b674c596b36ec9626bc4408&';
+  'https://cdn.discordapp.com/attachments/1438549082003214427/1548323637784739991/scr_map_2.4_yss.gif?ex=6ab08781&is=6aaf3601&hm=6d9bfb9e171439afe1768b75cbf14dabed9168713c23795f38364154e8eaa795&';
 
 export const ANNOUNCEMENT_TEMPLATE = `# May I have everyone drive in [ZONE]!
 **Zone Coverage:**
@@ -54,34 +55,58 @@ export const SCRIPT_LINES: string[] = [
 export interface StationInfo { code: string; name: string; }
 
 export const STATION_LIST: StationInfo[] = [
-  {code:'WFD', name:'Willowfield'}, {code:'STV', name:'Stepford Victoria'},
-  {code:'STB', name:'Stepford Bay'}, {code:'CHP', name:'City Hospital'},
-  {code:'SCN', name:'Stepford Central'}, {code:'WHF', name:'Whitefield'},
-  {code:'SCE', name:'Stepford East'}, {code:'SHS', name:'Stepford High Street'},
-  {code:'SHB', name:'St. Helens Bridge'}, {code:'COX', name:'Coxly'},
-  {code:'EBR', name:'East Berrily'}, {code:'WNG', name:'Whitney Green'},
-  {code:'NRH', name:'Newry Harbour'}, {code:'WBN', name:'West Benton'},
-  {code:'BEN', name:'Benton'}, {code:'CON', name:'Connolly'},
-  {code:'PBE', name:'Port Benton'}, {code:'MGT', name:'Morganstown'},
-  {code:'MGD', name:'Morganstown Docks'}, {code:'BBG', name:'Benton Bridge'},
-  {code:'USP', name:'Upper Staploe'}, {code:'SAP', name:'Stepford Airport Parkway'},
-  {code:'SAZ', name:'Airport Terminal 3'}, {code:'SAX', name:'Airport Terminal 2'},
-  {code:'SAW', name:'Airport West'}, {code:'EFD', name:'Esterfield'},
-  {code:'WTN', name:'Water Newton'}, {code:'MRC', name:'Millcastle Racecourse'},
-  {code:'LTW', name:'Leighton West'}, {code:'RLB', name:'Rayleigh Bay'},
-  {code:'LYN', name:'Llyn-By-The-Sea'}, {code:'MLC', name:'Millcastle'},
+  {code:'SAO', name:'Airport Terminal 1'}, {code:'SAX', name:'Airport Terminal 2'},
+  {code:'SAZ', name:'Airport Terminal 3'}, {code:'SAW', name:'Airport West'},
+  {code:'AGP', name:'Angel Pass'}, {code:'APK / ASP', name:'Ashlan Park'},
+  {code:'ALB', name:'Aslockby'}, {code:'BAR', name:'Barton'},
+  {code:'BLP', name:'Beaulieu Park'}, {code:'BCY', name:'Beechley'},
+  {code:'BEN', name:'Benton'}, {code:'BBG', name:'Benton Bridge'},
+  {code:'BRY', name:'Berrily'}, {code:'BOD', name:'Bodin'},
+  {code:'CXN', name:'Cadoxton'}, {code:'CSP', name:'Cambridge Street Parkway'},
+  {code:'CLB', name:'Carnalea Bridge'}, {code:'CHP', name:'City Hospital'},
+  {code:'CON', name:'Connolly'}, {code:'COX', name:'Coxly'},
+  {code:'CXN', name:'Coxly Newtown'}, {code:'DTR', name:'Denton Road'},
+  {code:'EBR', name:'East Berrily'}, {code:'EDQ', name:'Eden Quay'},
+  {code:'EGM / EDG', name:'Edgemead'}, {code:'ELJ', name:'Elsemere Junction'},
+  {code:'ELP', name:'Elsemere Pond'}, {code:'EFD', name:'Esterfield'},
+  {code:'FRD', name:'Faraday Road'}, {code:'FAR', name:'Farleigh'},
+  {code:'FAY', name:'Faymere'}, {code:'FNQ', name:'Financial Quarter'},
+  {code:'FOW', name:'Four Ways'}, {code:'GNS', name:'Greenslade'},
+  {code:'HHG', name:'Hampton Hargate'}, {code:'HMD', name:'Hemdon Park'},
+  {code:'HTR', name:'Houghton Rake'}, {code:'JST', name:'James Street'},
+  {code:'LTC', name:'Leighton City'}, {code:'LSR', name:'Leighton Stepford Road'},
+  {code:'LTW', name:'Leighton West'}, {code:'LYN', name:'Llyn-by-the-Sea'},
+  {code:'MLC / MCL', name:'Millcastle'}, {code:'MRC', name:'Millcastle Racecourse'},
+  {code:'MGT', name:'Morganstown'}, {code:'MGD', name:'Morganstown Docks'},
+  {code:'NHR', name:'New Harrow'}, {code:'NRY', name:'Newry'},
+  {code:'NRH', name:'Newry Harbour'}, {code:'NTR', name:'Northshore'},
+  {code:'PBE', name:'Port Benton'}, {code:'RLB', name:'Rayleigh Bay'},
+  {code:'RNW', name:'Robinson Way'}, {code:'RCP', name:'Rocket Parade'},
+  {code:'RDV', name:'Rosedale Village'}, {code:'SHB', name:'St Helens Bridge'},
+  {code:'STL', name:'Starryloch'}, {code:'SAC', name:'Stepford Airport Central'},
+  {code:'SAP', name:'Stepford Airport Parkway'}, {code:'STB', name:'Stepford Bay'},
+  {code:'SCN', name:'Stepford Central'}, {code:'SCE', name:'Stepford East'},
+  {code:'SHS', name:'Stepford High Street'}, {code:'SUFC', name:'Stepford United Football Club'},
+  {code:'SVC', name:'Stepford Victoria'}, {code:'USP', name:'Upper Staploe'},
+  {code:'WTN', name:'Water Newton'}, {code:'WEB', name:'West Benton'},
+  {code:'WCT', name:'Westercoast'}, {code:'WYV', name:'Westwyvern'},
+  {code:'WHF', name:'Whitefield'}, {code:'WFL', name:'Whitefield Lido'},
+  {code:'WNG', name:'Whitney Green'}, {code:'WFD', name:'Willowfield'},
+  {code:'WHL', name:'Woodhead Lane'},
 ];
 
 export function buildStationAnnouncement(station: StationInfo): string {
-  return `\ud83d\udcf8 Taking a screenshot at **${station.name}** (${station.code})!\nFeel free to stop by if you're nearby.`;
+  return `\ud83d\udcf8 Screenie at **${station.name}** (${station.code})!`;
 }
 
 export const STAFF_ROLES = ['Main AST', 'Assistant', 'Co-Host', 'Internal Helper'] as const;
 
 // ── Post-session report — ported from sessionongoing.js's buildReportText() ──
-export function formatUKTime(ts: number | null | undefined): string {
+export function formatUKTime(ts: number | null | undefined, timezoneMode: SiteTimezoneMode): string {
   if (!ts) return '—';
-  return new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ts));
+  return formatInstantInSiteTimezone(new Date(ts), timezoneMode, {
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  });
 }
 
 export function formatDdMmYyyy(isoDate: string | null | undefined): string {
@@ -91,6 +116,7 @@ export function formatDdMmYyyy(isoDate: string | null | undefined): string {
 }
 
 export interface ReportInput {
+  timezoneMode: SiteTimezoneMode;
   hostName: string;
   sessionDateIso: string | null;
   timeTracker: { briefingStart?: number; sgShiftStart?: number; screenieTime?: number };
@@ -110,12 +136,12 @@ export function buildReportText(input: ReportInput): string {
   return `========REPORT BASED ON THE SIGNALLING PRACTICE==========
 Host: ${input.hostName}
 Date: ${formatDdMmYyyy(input.sessionDateIso)}
-Time: ${formatUKTime(Date.now())} BST/GMT
+Time: ${formatUKTime(Date.now(), input.timezoneMode)} ${input.timezoneMode}
 
 ----------
-Actual Briefing start: ${formatUKTime(input.timeTracker.briefingStart)}
-Actual SG Shift start: ${formatUKTime(input.timeTracker.sgShiftStart)}
-Actual Screenie time: ${formatUKTime(input.timeTracker.screenieTime)}
+Actual Briefing start: ${formatUKTime(input.timeTracker.briefingStart, input.timezoneMode)}
+Actual SG Shift start: ${formatUKTime(input.timeTracker.sgShiftStart, input.timezoneMode)}
+Actual Screenie time: ${formatUKTime(input.timeTracker.screenieTime, input.timezoneMode)}
 
 ----------
 

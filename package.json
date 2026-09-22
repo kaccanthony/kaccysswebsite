@@ -16,6 +16,7 @@
     "@fortawesome/react-fontawesome": "^3.5.0",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.111.0",
+    "@tanstack/react-virtual": "^3.14.13",
     "aos": "^2.3.4",
     "next": "16.2.12",
     "react": "19.2.4",

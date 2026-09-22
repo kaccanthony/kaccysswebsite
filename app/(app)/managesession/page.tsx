@@ -5,6 +5,7 @@ import { createClient } from '@/utils/supabase/server';
 import ManageSessionInteractive, { type SessionRow, type StaffOption } from './ManageSessionInteractive';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
+import { canManageSiteTimezone, getSiteTimezoneMode } from '@/lib/siteTimezone';
 import './managesession.css';
 
 export const metadata = { title: 'Manage Sessions' };
@@ -40,6 +41,7 @@ export default async function ManageSessionPage({
 
   const params = await searchParams;
   const supabase = await createClient();
+  const timezoneMode = await getSiteTimezoneMode(supabase);
 
   // No server-side search/filter params anymore — the full list loads once,
   // and ManageSessionInteractive filters it live in the browser as you type.
@@ -141,6 +143,8 @@ export default async function ManageSessionPage({
         staff={staff}
         rawRole={user.effectiveRole}
         permLevel={user.effectivePermLevel}
+        timezoneMode={timezoneMode}
+        canManageTimezone={canManageSiteTimezone(user)}
         success={params.success}
       />
     </>

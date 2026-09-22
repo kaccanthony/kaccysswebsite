@@ -39,13 +39,18 @@ interface AppShellProps {
   /** Server-computed: does the viewer have a live session right now? Seeds the topbar
    * pill so it's correct on every page load, not just after /active's own poller runs. */
   hasLiveSession?: boolean;
+  /** Persisted session_ongoing.last_updated timestamp (epoch ms). */
+  liveSessionLastChangeAt?: number | null;
   children: React.ReactNode;
 }
 
 export default function AppShell(props: AppShellProps) {
-  const { hasLiveSession = false, ...rest } = props;
+  const { hasLiveSession = false, liveSessionLastChangeAt = null, ...rest } = props;
   return (
-    <LiveSessionProvider initialStatus={{ active: hasLiveSession, lastChangeAt: Date.now() }}>
+    <LiveSessionProvider initialStatus={{
+      active: hasLiveSession,
+      lastChangeAt: liveSessionLastChangeAt ?? Date.now(),
+    }}>
       <AppShellInner {...rest} />
     </LiveSessionProvider>
   );
@@ -216,7 +221,7 @@ function AppShellInner({ user, assignedSessions, unreadCount, viewingAs = null, 
             <div className="popup-section-label">Assigned Sessions</div>
             <div className="popup-sessions">
               {assignedSessions.length === 0 ? (
-                <span className="session-pill"><FontAwesomeIcon icon={ICONS.circleDot} /> No active sessions</span>
+                <span className="session-pill"><FontAwesomeIcon icon={ICONS.circleDot} /> No assigned sessions</span>
               ) : (
                 assignedSessions.map((s) => (
                   <span key={s.sessionId} className="session-pill">

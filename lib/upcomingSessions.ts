@@ -1,5 +1,11 @@
 // FILE: lib/upcomingSessions.ts
 import { createClient } from '@/utils/supabase/server';
+import {
+  currentSiteTimeParts,
+  getSiteTimezoneMode,
+  siteWallTimeToISOString,
+  type SiteTimezoneMode,
+} from '@/lib/siteTimezone';
 
 export interface TraineeInfo {
   discord: string;
@@ -14,16 +20,17 @@ export interface UpcomingSession {
   session_status: string | null;
   session_duration: string | null; // session_upcoming.session_duration is character varying, not numeric
   session_datetime_iso: string | null;
+  timezone_mode: SiteTimezoneMode;
   host: string | null;
   cohost1: string | null;
   cohost2: string | null;
   cohost3: string | null;
-  supervisor: string | null; // role = 'cohost4_supervisor' in session_staff
+  supervisor: string | null; // role = CH_4 (optionally CH_4, IH) in session_staff
   assistant1: string | null;
   assistant2: string | null;
   assistant3: string | null;
   assistant4: string | null;
-  additionalStaff: string[]; // role = 'additional' — session_staff allows multiple rows of this role
+  additionalStaff: string[]; // session_staff roles prefixed with "Add T. "
   cohost_filled: number;
   cohost_total: number;
   assistant_filled: number;
@@ -31,6 +38,7 @@ export interface UpcomingSession {
   trainee_filled: number;
   trainee_total: number;
   trainees: TraineeInfo[];
+  reserved_trainees: TraineeInfo[];
 }
 
 const LONDON_TZ = 'Europe/London';
@@ -93,11 +101,8 @@ export function toLondonISOString(dateStr: string, timeStr: string): string | nu
   }
 }
 
-function nowLondonParts(): { date: string; time: string } {
-  const now = new Date();
-  const date = now.toLocaleDateString('en-CA', { timeZone: LONDON_TZ }); // YYYY-MM-DD
-  const time = now.toLocaleTimeString('en-GB', { timeZone: LONDON_TZ, hour12: false }); // HH:mm:ss
-  return { date, time };
+function nowLondonParts(mode: SiteTimezoneMode): { date: string; time: string } {
+  return currentSiteTimeParts(mode);
 }
 
 interface SessionStaffRow {
@@ -126,7 +131,8 @@ interface SessionTraineeRow {
  */
 export async function getUpcomingSessions(): Promise<UpcomingSession[]> {
   const supabase = await createClient();
-  const { date: todayBST, time: nowTimeBST } = nowLondonParts();
+  const timezoneMode = await getSiteTimezoneMode(supabase);
+  const { date: todayBST, time: nowTimeBST } = nowLondonParts(timezoneMode);
 
   const { data: sessions, error } = await supabase
     .from('session_upcoming')
@@ -169,27 +175,38 @@ export async function getUpcomingSessions(): Promise<UpcomingSession[]> {
     traineesBySession.set(row.session_id, list);
   }
 
-  return sessions.map((row: Record<string, any>): UpcomingSession => {
+  return sessions.map((row): UpcomingSession => {
     const staff = staffBySession.get(row.session_id) ?? [];
-    const roleName = (role: string) => staff.find((r) => r.role === role)?.staff_name ?? null;
+    const roleName = (role: string) => staff.find(
+      (staffRow) => staffRow.role === role || staffRow.role.startsWith(`${role},`)
+    )?.staff_name ?? null;
 
-    const host = roleName('host');
-    const cohost1 = roleName('cohost1');
-    const cohost2 = roleName('cohost2');
-    const cohost3 = roleName('cohost3');
-    const supervisor = roleName('cohost4_supervisor');
-    const assistant1 = roleName('assistant1');
-    const assistant2 = roleName('assistant2');
-    const assistant3 = roleName('assistant3');
-    const assistant4 = roleName('assistant4');
-    const additionalStaff = staff.filter((r) => r.role === 'additional').map((r) => r.staff_name);
+    const host = roleName('HOST');
+    const cohost1 = roleName('CH_1');
+    const cohost2 = roleName('CH_2');
+    const cohost3 = roleName('CH_3');
+    const supervisor = roleName('CH_4');
+    const assistant1 = roleName('AST_1');
+    const assistant2 = roleName('AST_2');
+    const assistant3 = roleName('AST_3');
+    const assistant4 = roleName('AST_4');
+    const additionalStaff = staff.filter((staffRow) => staffRow.role.startsWith('Add T. ')).map((staffRow) => staffRow.staff_name);
 
     const cohostFilled = [cohost1, cohost2, cohost3].filter(Boolean).length;
     const assistantFilled = [assistant1, assistant2, assistant3, assistant4].filter(Boolean).length;
 
     // main slots only — standby trainees aren't counted toward the fill count
-    const traineeSlots = (traineesBySession.get(row.session_id) ?? []).filter((t) => !t.is_standby);
+    const allTraineeSlots = traineesBySession.get(row.session_id) ?? [];
+    const traineeSlots = allTraineeSlots.filter((t) => !t.is_standby);
+    const reservedSlots = allTraineeSlots.filter((t) => t.is_standby);
     const trainees: TraineeInfo[] = traineeSlots
+      .filter((t) => t.trainee_discord)
+      .map((t) => ({
+        discord: t.trainee_discord as string,
+        zone: t.zone != null ? String(t.zone) : '',
+        trainer: t.trainer_name ?? '',
+      }));
+    const reservedTrainees: TraineeInfo[] = reservedSlots
       .filter((t) => t.trainee_discord)
       .map((t) => ({
         discord: t.trainee_discord as string,
@@ -203,7 +220,8 @@ export async function getUpcomingSessions(): Promise<UpcomingSession[]> {
       session_desc: row.session_desc ?? null,
       session_status: row.session_status ?? null,
       session_duration: row.session_duration ?? null,
-      session_datetime_iso: toLondonISOString(row.session_date, row.session_time),
+      session_datetime_iso: siteWallTimeToISOString(row.session_date, row.session_time, timezoneMode),
+      timezone_mode: timezoneMode,
       host,
       cohost1,
       cohost2,
@@ -221,6 +239,7 @@ export async function getUpcomingSessions(): Promise<UpcomingSession[]> {
       trainee_filled: trainees.length,
       trainee_total: Number(row.num_slots ?? 0),
       trainees,
+      reserved_trainees: reservedTrainees,
     };
   });
 }

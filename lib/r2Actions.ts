@@ -4,12 +4,11 @@
 import { getCurrentUser } from './getCurrentUser';
 import { uploadToR2, buildKey } from './r2';
 
-const MAX_SIZE = 8 * 1024 * 1024; // 8MB — adjust when the real feature lands
+const MAX_SIZE = 8 * 1024 * 1024;
 const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
 export async function uploadImage(folder: string, file: File): Promise<{ url: string } | { error: string }> {
-  await getCurrentUser(); // must be signed in — redirects to /login otherwise
-
+  await getCurrentUser();
   if (!ALLOWED_TYPES.includes(file.type)) {
     return { error: 'Only PNG, JPEG, WebP, or GIF images are allowed.' };
   }

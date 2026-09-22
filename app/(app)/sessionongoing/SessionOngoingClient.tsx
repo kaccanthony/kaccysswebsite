@@ -26,6 +26,29 @@ import type {
   ViewerRole, MyRole,
 } from '@/types/session';
 import styles from './sessionongoing.module.css';
+import { formatInstantInSiteTimezone, type SiteTimezoneMode } from '@/lib/siteTimezone';
+
+const TRAINEE_COLUMNS = [
+  { n: 1, label: 'Pop-out', minWidth: 70, maxWidth: 80, width: 74 },
+  { n: 2, label: 'Slot', minWidth: 64, maxWidth: 80, width: 70 },
+  { n: 3, label: 'Trainee Discord', minWidth: 110, maxWidth: 160, width: 130 },
+  { n: 4, label: 'Discord ID', minWidth: 90, maxWidth: 140, width: 100 },
+  { n: 5, label: 'Roblox', minWidth: 90, maxWidth: 140, width: 100 },
+  { n: 6, label: 'Zone', minWidth: 90, maxWidth: 120, width: 100 },
+  { n: 7, label: 'Timer', minWidth: 190, maxWidth: 220, width: 190 },
+  { n: 8, label: 'Timer Pop-out', minWidth: 120, maxWidth: 140, width: 120 },
+  { n: 9, label: 'Attendance', minWidth: 100, maxWidth: 120, width: 110 },
+  { n: 10, label: 'Trainer', minWidth: 110, maxWidth: 160, width: 126 },
+  { n: 11, label: 'Trainer Discord ID', minWidth: 120, maxWidth: 160, width: 140 },
+  { n: 12, label: 'Feedback', minWidth: 110, maxWidth: 130, width: 110 },
+  { n: 13, label: 'Announcements', minWidth: 160, maxWidth: 240, width: 220 },
+  { n: 14, label: 'Trainee Notes', minWidth: 150, maxWidth: 240, width: 200 },
+  { n: 15, label: 'Completed', minWidth: 100, maxWidth: 130, width: 110 },
+  { n: 16, label: 'Remove', minWidth: 70, maxWidth: 90, width: 80 },
+] as const;
+
+// Pop-out columns (1, 8) are deliberately excluded from "Hide extras" — same as the original.
+const EXTRA_COLUMN_NUMS = new Set([2, 4, 9, 11, 14, 16]);
 
 // ── helpers ported 1:1 from sessionongoing.js ──
 function fmt(s: number): string {
@@ -47,6 +70,12 @@ function computeCurrentRemaining(t: TimerState): number {
   return Math.max(0, t.remainingSeconds - elapsed);
 }
 function newUid() { return 'u_' + Math.random().toString(36).slice(2) + Date.now(); }
+
+function parseAttendance(value: string | null | undefined, rowOrder: string[]): Record<string, boolean> {
+  if (!value) return {};
+  const parts = value.includes(',') ? value.split(',') : [...value];
+  return Object.fromEntries(rowOrder.map((row, index) => [row, parts[index] === '1']));
+}
 
 // Ported from makeColumnsResizable() in the original. Mutates th.style.width
 // directly during drag rather than going through React state — same reasoning
@@ -119,13 +148,26 @@ function useDraggableWidget(widgetRef: React.RefObject<HTMLDivElement | null>, o
 // `win` matters here: when this renders inside the Document PiP pop-out, the
 // copy button needs *that* window's clipboard/navigator, not the main page's —
 // same reasoning as the original's `doc.defaultView || window` line.
-function ScriptPreview({ minutes, win }: { minutes: number; win: Window }) {
+function ScriptPreview({
+  minutes,
+  win,
+  traineeName,
+  location,
+}: {
+  minutes: number;
+  win: Window;
+  traineeName: string;
+  location: string;
+}) {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   return (
     <div className={styles.scriptPreview}>
       {SCRIPT_LINES.map((lineText, i) => {
-        const resolvedText = lineText.replace(/XX/g, String(minutes));
+        const resolvedText = lineText
+          .replaceAll('[NAME]', traineeName.trim() || '[NAME]')
+          .replaceAll('[LOCATION]', location.trim() || '[LOCATION]')
+          .replace(/XX/g, String(minutes));
         // Parenthetical director's notes — e.g. "(Wait for trainee to arrive)" —
         // are shown in the preview but stripped from what actually gets copied.
         const copyText = resolvedText.replace(/\([^)]*\)/g, '').replace(/\s{2,}/g, ' ').trim();
@@ -158,9 +200,104 @@ function ScriptPreview({ minutes, win }: { minutes: number; win: Window }) {
   );
 }
 
+type ToastKind = 'success' | 'warning' | 'error' | 'info';
+interface ToastEntry {
+  id: number;
+  message: string;
+  kind: ToastKind;
+  actorName: string;
+}
+
+const OVERRIDE_LABELS: Record<keyof OverridesState, string> = {
+  'session-details': 'Override Session Details',
+  trainees: 'Override Trainees',
+  'staff-roles': 'Assistant Staff Role Override',
+  'drivers-disable': 'Assistant Driver Input',
+  'slot-order': 'Override Slot Ordering',
+  'staff-delete': 'Staff Deletion Override',
+  'trainee-details': 'Override Trainee Details',
+  'trainer-details': 'Trainer Assignment Override',
+  'staff-addition': 'Staff Addition',
+  'allow-all': 'Override for Everyone',
+};
+
+function SessionElapsedClock({
+  startedAt,
+  scheduledStartIso,
+  durationMinutes,
+}: {
+  startedAt: string | null;
+  scheduledStartIso: string | null;
+  durationMinutes: number;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const actualStart = startedAt ? new Date(startedAt).getTime() : now;
+  const scheduledStart = scheduledStartIso ? new Date(scheduledStartIso).getTime() : actualStart;
+  const elapsed = Math.max(0, Math.floor((now - actualStart) / 1000));
+  const overtime = durationMinutes > 0 && now - scheduledStart > durationMinutes * 60_000;
+
+  return (
+    <>
+      <div className={`${styles.globalTimerValue} ${overtime ? styles.globalTimerOvertime : ''}`} aria-live="off">
+        {fmtHMS(elapsed)}
+      </div>
+      {overtime && (
+        <span className={styles.overtimePill}>
+          <FontAwesomeIcon icon={ICONS.triangleExclamation} /> Overtime — please pick up the pace and conclude the session now.
+        </span>
+      )}
+    </>
+  );
+}
+
+function LiveTimerText({
+  timer,
+  fallbackSeconds,
+  onExpired,
+  large = false,
+}: {
+  timer: TimerState | undefined;
+  fallbackSeconds: number;
+  onExpired?: () => void;
+  large?: boolean;
+}) {
+  const [remaining, setRemaining] = useState(() => timer ? computeCurrentRemaining(timer) : fallbackSeconds);
+  const notifiedSyncRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const update = () => setRemaining(timer ? computeCurrentRemaining(timer) : fallbackSeconds);
+    update();
+    if (!timer?.running) return;
+    const id = window.setInterval(update, 1000);
+    return () => window.clearInterval(id);
+  }, [timer, fallbackSeconds]);
+
+  useEffect(() => {
+    if (remaining > 0) notifiedSyncRef.current = null;
+    if (!timer?.running || remaining > 0 || notifiedSyncRef.current === timer.syncedAt) return;
+    notifiedSyncRef.current = timer.syncedAt;
+    onExpired?.();
+  }, [remaining, timer, onExpired]);
+
+  return (
+    <span
+      className={`${styles.timerDisplay} ${timer?.running && remaining > 60 ? styles.running : remaining <= 0 ? styles.expired : remaining <= 60 ? styles.low : ''}`}
+      style={large ? { fontSize: '2rem' } : undefined}
+    >
+      {fmt(remaining)}
+    </span>
+  );
+}
+
 const DEFAULT_OVERRIDES: OverridesState = {
   'session-details': false, trainees: false, 'staff-roles': false, 'drivers-disable': false,
-  'slot-order': false, 'staff-delete': false, 'trainee-details': false, 'trainer-details': false, 'allow-all': false,
+  'slot-order': false, 'staff-delete': false, 'trainee-details': false, 'trainer-details': false,
+  'staff-addition': true, 'allow-all': false,
 };
 
 interface Props {
@@ -174,6 +311,8 @@ interface Props {
   // wire it up there for exact parity.
   eligibleHosts?: string[];
   scheduledStartIso: string | null;
+  standbySlots: number[];
+  timezoneMode: SiteTimezoneMode;
   viewerRole: ViewerRole;
   myDisplayName: string;
   username: string;
@@ -187,7 +326,7 @@ interface Props {
 
 export default function SessionOngoingClient(props: Props) {
   const {
-    initialSession, staffDirectory, eligibleStaff, eligibleHosts, scheduledStartIso, viewerRole, myDisplayName,
+    initialSession, staffDirectory, eligibleStaff, eligibleHosts, scheduledStartIso, standbySlots, timezoneMode, viewerRole, myDisplayName,
     prefTraineeWarning, prefAnnouncementDisplay, prefAnnouncementEnabled,
   } = props;
   const hostOptions = eligibleHosts ?? Object.keys(staffDirectory);
@@ -196,6 +335,12 @@ export default function SessionOngoingClient(props: Props) {
   const isHost = myRole === 'host';
   const isAssistant = myRole === 'assistant';
   const sessionId = initialSession.session_id;
+  const initialLiveState = initialSession.live_state ?? {};
+  const initialAllocatedRows = Array.from({ length: initialSession.num_slots || 10 }, (_, i) => String(i));
+  const initialStandbyRows = standbySlots.map((slot) => String(slot - 1));
+  const initialRowOrder = (initialLiveState.slotOrder ?? initialAllocatedRows)
+    .filter((row) => initialAllocatedRows.includes(row));
+  const initialTraineeRows = [...initialRowOrder, ...initialStandbyRows];
 
   const myClientId = useMemo(() => {
     if (typeof window === 'undefined') return '';
@@ -206,21 +351,27 @@ export default function SessionOngoingClient(props: Props) {
 
   // ── core state (mirrors the module-level `let`s in sessionongoing.js) ──
   const [session, setSession] = useState<SessionOngoingRow>(initialSession);
-  const [liveState, setLiveState] = useState<LiveState>(initialSession.live_state ?? {});
-  const [overrides, setOverrides] = useState<OverridesState>(liveState.overrides ?? DEFAULT_OVERRIDES);
-  const [timers, setTimers] = useState<Record<string, TimerState>>({});
-  const [drivers, setDrivers] = useState<DriverRow[]>([]);
-  const [staffShift, setStaffShift] = useState<StaffShiftRow[]>([]);
-  const [feedbackData, setFeedbackData] = useState<FeedbackDataMap>(liveState.feedbackData ?? {});
-  const [completedRows, setCompletedRows] = useState<Record<string, boolean>>(liveState.completedRows ?? {});
-  const [unallocated, setUnallocated] = useState<UnallocatedTrainee[]>(liveState.unallocatedTrainees ?? []);
-  const [timeTracker, setTimeTracker] = useState<TimeTracker>(liveState.timeTracker ?? {});
-  const [mainAstNotes, setMainAstNotes] = useState(liveState.mainAstNotes ?? '');
+  const [overrides, setOverrides] = useState<OverridesState>({ ...DEFAULT_OVERRIDES, ...initialLiveState.overrides });
+  const [timers, setTimers] = useState<Record<string, TimerState>>(initialLiveState.timers ?? {});
+  const [drivers, setDrivers] = useState<DriverRow[]>(initialLiveState.drivers ?? []);
+  const [staffShift, setStaffShift] = useState<StaffShiftRow[]>(initialLiveState.staffShift ?? []);
+  const [feedbackData, setFeedbackData] = useState<FeedbackDataMap>(initialLiveState.feedbackData ?? {});
+  const [completedRows, setCompletedRows] = useState<Record<string, boolean>>(initialLiveState.completedRows ?? {});
+  const [unallocated, setUnallocated] = useState<UnallocatedTrainee[]>(initialLiveState.unallocatedTrainees ?? []);
+  const [timeTracker, setTimeTracker] = useState<TimeTracker>(initialLiveState.timeTracker ?? {});
+  const [mainAstNotes, setMainAstNotes] = useState(initialLiveState.mainAstNotes ?? '');
   const [statusValue, setStatusValue] = useState((session.session_status || 'inprogress').toLowerCase().replace(/\s+/g, ''));
   // Attendance wasn't wired to state in the initial port — bare checkbox, visual only.
   // Needed for real for the report's "Cancelled/No-show" list, so wiring it up now.
-  const [attendance, setAttendance] = useState<Record<string, boolean>>({});
-  const [toasts, setToasts] = useState<{ id: number; message: string }[]>([]);
+  const [attendance, setAttendance] = useState<Record<string, boolean>>(() => {
+    const initial = parseAttendance(initialSession.trainee_attendance, initialRowOrder);
+    for (const row of initialStandbyRows) {
+      initial[row] = Boolean(initialLiveState.trainees?.[row]?.attended);
+    }
+    return initial;
+  });
+  const [toasts, setToasts] = useState<ToastEntry[]>([]);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [confirmState, setConfirmState] = useState<{ title: string; message: string; resolve: (v: boolean) => void } | null>(null);
   const [feedbackModalRow, setFeedbackModalRow] = useState<string | null>(null);
   // Auto-shows when the modal opens — "the script in the modal only, the
@@ -257,18 +408,45 @@ export default function SessionOngoingClient(props: Props) {
   // from the 1s trainee-timer ticker below since it only needs ~500ms granularity.
   const [bellNow, setBellNow] = useState(Date.now());
   useEffect(() => {
-    const id = setInterval(() => setBellNow(Date.now()), 500);
-    return () => clearInterval(id);
-  }, []);
-  const [elapsed, setElapsed] = useState(0);
-  const { reportActive, reportInactive } = useLiveSession();
+    const now = Date.now();
+    const deadlines = Object.values(bellLocalCooldownUntil).filter((value) => value > now);
+    const globalCooldown = bell?.cooldown_until ? new Date(bell.cooldown_until).getTime() : 0;
+    if (globalCooldown > now) deadlines.push(globalCooldown);
+    if (bell?.active && bell.ring_count < 3 && bell.last_ring_at) {
+      const rerollAt = new Date(bell.last_ring_at).getTime() + 5000;
+      if (rerollAt > now) deadlines.push(rerollAt);
+    }
+    if (deadlines.length === 0) return;
+    const id = window.setTimeout(() => setBellNow(Date.now()), Math.max(50, Math.min(...deadlines) - now + 50));
+    return () => window.clearTimeout(id);
+  }, [bell, bellLocalCooldownUntil, bellNow]);
+  const { reportActive } = useLiveSession();
   useEffect(() => {
-    reportActive(true);
-    return () => reportInactive();
+    const persistedChange = initialSession.last_updated ?? initialSession.started_at;
+    const changedAt = persistedChange ? new Date(persistedChange).getTime() : undefined;
+    // Mounting/refreshing confirms activity; it is not itself a session change.
+    reportActive(false, changedAt);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const dirtyRef = useRef({ live: false, staffCore: false, overrides: false, status: false, details: false, attendance: false, traineeRows: new Set<string>() });
+  const dirtyRef = useRef({
+    liveFields: new Set<keyof LiveState>(),
+    status: false,
+    details: false,
+    attendance: false,
+    traineeRows: new Set<string>(),
+  });
+  const changeVersionRef = useRef(0);
+  const savePromiseRef = useRef<Promise<boolean> | null>(null);
+  const lastSyncErrorRef = useRef<{ message: string; at: number } | null>(null);
+  const queueSync = useCallback((field?: keyof LiveState) => {
+    if (field) dirtyRef.current.liveFields.add(field);
+    changeVersionRef.current += 1;
+    // Every controller mutation funnels through queueSync. Report immediately
+    // so "last change" resets while typing/clicking, not only after the
+    // debounced request and Supabase realtime round trip complete.
+    reportActive(true);
+  }, [reportActive]);
   const traineeCountRef = useRef(initialSession.num_slots || 10);
 
   // ── trainee rows: allocated (1..num_slots) + unallocated, mirrors renumberSlots/addTraineeRow ──
@@ -279,7 +457,9 @@ export default function SessionOngoingClient(props: Props) {
     () => Array.from({ length: session.num_slots || 10 }, (_, i) => String(i)),
     [session.num_slots]
   );
-  const [rowOrder, setRowOrder] = useState<string[]>(() => initialSession.live_state?.slotOrder ?? allocatedRows);
+  const standbyRows = useMemo(() => standbySlots.map((slot) => String(slot - 1)), [standbySlots]);
+  const [rowOrder, setRowOrder] = useState<string[]>(initialRowOrder);
+  const allTraineeRows = useMemo(() => [...rowOrder, ...standbyRows], [rowOrder, standbyRows]);
   useEffect(() => {
     // keep rowOrder in sync if num_slots changes (rows added/removed) —
     // append any new rows, drop any that no longer exist
@@ -300,7 +480,7 @@ export default function SessionOngoingClient(props: Props) {
     setTimers((prev) => {
       const next = { ...prev };
       let changed = false;
-      for (const row of allocatedRows) {
+      for (const row of [...allocatedRows, ...standbyRows]) {
         if (!next[row]) {
           next[row] = { remainingSeconds: (session.trainee_timer || 12) * 60, running: false, syncedAt: Date.now() };
           changed = true;
@@ -308,8 +488,7 @@ export default function SessionOngoingClient(props: Props) {
       }
       return changed ? next : prev;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allocatedRows]);
+  }, [allocatedRows, standbyRows, session.trainee_timer]);
 
   // ── controlled state for editable trainee-detail fields ──
   // Previously these were uncontrolled inputs (defaultValue only, no onChange),
@@ -332,80 +511,142 @@ export default function SessionOngoingClient(props: Props) {
   }, []);
   const [traineeDetails, setTraineeDetails] = useState<Record<string, TraineeDetail>>(() => {
     const map: Record<string, TraineeDetail> = {};
-    for (const row of allocatedRows) map[row] = buildTraineeDetail(initialSession, row);
+    for (const row of initialTraineeRows) map[row] = buildTraineeDetail(initialSession, row);
     return map;
   });
   const updateTraineeDetail = useCallback((row: string, patch: Partial<TraineeDetail>) => {
     setTraineeDetails((prev) => ({ ...prev, [row]: { ...(prev[row] ?? buildTraineeDetail(session, row)), ...patch } }));
     dirtyRef.current.traineeRows.add(row);
     queueSync();
-  }, [buildTraineeDetail, session]);
+  }, [buildTraineeDetail, session, queueSync]);
 
 
-  const showToast = useCallback((message: string) => {
-    const id = Date.now() + Math.random();
-    setToasts((t) => [...t, { id, message }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3000);
+  const dismissToast = useCallback((id: number) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
   }, []);
+  const showToast = useCallback((message: string, kind: ToastKind = 'info', actorName = myDisplayName || viewerRole) => {
+    const id = Date.now() + Math.random();
+    setToasts((current) => [...current.slice(-3), { id, message, kind, actorName }]);
+    window.setTimeout(() => dismissToast(id), 10_000);
+  }, [dismissToast, myDisplayName, viewerRole]);
+  const copyWithFeedback = useCallback(async (key: string, text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      window.setTimeout(() => setCopiedKey((current) => current === key ? null : current), 1800);
+      showToast(`${label} copied successfully.`, 'success');
+    } catch {
+      showToast(`Could not copy ${label.toLowerCase()}. Check your clipboard permission.`, 'error');
+    }
+  }, [showToast]);
   // Native `disabled` blocks the click event entirely, so a toast could never
   // fire from it — this is the alternative for controls where we want an
   // explicit "here's why" message instead of just a greyed-out look.
   const lockedClick = useCallback((isLocked: boolean, message: string, action: () => void) => {
-    if (isLocked) { showToast(message); return; }
+    if (isLocked) {
+      const viewerMessage = isHost
+        ? message
+          .replace(/Ask the host to enable ([^.]+)\.?/i, 'Enable $1 in Session Controls.')
+          .replace(/Ask the host to turn off ([^.]+)\.?/i, 'Turn off $1 in Session Controls.')
+          .replace(/until the Host enables Session Details/i, 'until you enable Override Session Details')
+        : message;
+      showToast(viewerMessage, 'warning');
+      return;
+    }
     action();
-  }, [showToast]);
+  }, [isHost, showToast]);
   const showConfirm = useCallback((message: string, title = 'Are you sure?') => {
     return new Promise<boolean>((resolve) => setConfirmState({ title, message, resolve }));
   }, []);
 
+  const latestSyncStateRef = useRef({
+    statusValue, session, timers, drivers, staffShift, feedbackData,
+    completedRows, unallocated, timeTracker, mainAstNotes, overrides,
+    rowOrder, attendance, traineeDetails,
+  });
+  useEffect(() => {
+    latestSyncStateRef.current = {
+      statusValue, session, timers, drivers, staffShift, feedbackData,
+      completedRows, unallocated, timeTracker, mainAstNotes, overrides,
+      rowOrder, attendance, traineeDetails,
+    };
+  }, [
+    statusValue, session, timers, drivers, staffShift, feedbackData,
+    completedRows, unallocated, timeTracker, mainAstNotes, overrides,
+    rowOrder, attendance, traineeDetails,
+  ]);
+
   // ── realtime wiring — replaces setInterval(pushState/pullState, 5000) ──
   useSessionRealtime(sessionId, (row) => {
-    setSession(row);
+    const remote = row.live_state ?? {};
+    setSession((previous) => ({
+      // host/co-host/assistant values are UI fields derived from session_staff;
+      // a session_ongoing realtime row does not contain them.
+      ...previous,
+      ...row,
+      host: dirtyRef.current.details ? previous.host : (remote.sessionHost ?? previous.host),
+      ...(dirtyRef.current.details ? {
+        session_date: previous.session_date,
+        session_time: previous.session_time,
+        trainee_timer: previous.trainee_timer,
+      } : {}),
+    }));
     if (!dirtyRef.current.status) {
       setStatusValue((row.session_status || 'inprogress').toLowerCase().replace(/\s+/g, ''));
     }
-    setTraineeDetails((prev) => {
-      const next = { ...prev };
-      for (const r of allocatedRows) {
-        if (dirtyRef.current.traineeRows.has(r)) continue; // don't clobber an unsent local edit
-        next[r] = buildTraineeDetail(row, r);
-      }
-      return next;
-    });
-    const remote = row.live_state ?? {};
-    setLiveState(remote);
-    if (remote.feedbackData) setFeedbackData((f) => ({ ...f, ...remote.feedbackData }));
-    if (remote.completedRows) setCompletedRows(remote.completedRows);
-    if (remote.timeTracker) setTimeTracker((t) => ({ ...t, ...remote.timeTracker }));
-    if (remote.mainAstNotes !== undefined) setMainAstNotes(remote.mainAstNotes);
-    if (remote.drivers) setDrivers(remote.drivers);
-    if (remote.staffShift) setStaffShift(remote.staffShift);
-    if (remote.unallocatedTrainees) setUnallocated(remote.unallocatedTrainees);
-    if (remote.slotOrder) setRowOrder(remote.slotOrder);
-    if (row.trainee_attendance && !dirtyRef.current.attendance) {
-      const parts = row.trainee_attendance.split(',');
-      const order = remote.slotOrder ?? rowOrder;
-      setAttendance((prev) => {
+    const localLiveChanges = dirtyRef.current.liveFields;
+    if (remote.trainees) {
+      setTraineeDetails((prev) => {
         const next = { ...prev };
-        order.forEach((r, i) => { next[r] = parts[i] === '1'; });
+        for (const [rowKey, trainee] of Object.entries(remote.trainees!)) {
+          if (dirtyRef.current.traineeRows.has(rowKey)) continue;
+          next[rowKey] = {
+            discord: trainee.discord,
+            discordId: trainee.discordId,
+            roblox: trainee.roblox,
+            zone: trainee.zone,
+            trainerName: trainee.trainerName,
+            notes: trainee.notes,
+          };
+        }
         return next;
       });
+      if (!dirtyRef.current.attendance) {
+        setAttendance(Object.fromEntries(
+          Object.entries(remote.trainees).map(([rowKey, trainee]) => [rowKey, trainee.attended])
+        ));
+      }
     }
-    if (remote.overrides) setOverrides(remote.overrides);
-    if (remote.timers) {
+    if (remote.feedbackData && !localLiveChanges.has('feedbackData')) setFeedbackData((f) => ({ ...f, ...remote.feedbackData }));
+    if (remote.completedRows && !localLiveChanges.has('completedRows')) setCompletedRows(remote.completedRows);
+    if (remote.timeTracker && !localLiveChanges.has('timeTracker')) setTimeTracker((t) => ({ ...t, ...remote.timeTracker }));
+    if (remote.mainAstNotes !== undefined && !localLiveChanges.has('mainAstNotes')) setMainAstNotes(remote.mainAstNotes);
+    if (remote.drivers && !localLiveChanges.has('drivers')) setDrivers(remote.drivers);
+    if (remote.staffShift && !localLiveChanges.has('staffShift')) setStaffShift(remote.staffShift);
+    if (remote.unallocatedTrainees && !localLiveChanges.has('unallocatedTrainees')) setUnallocated(remote.unallocatedTrainees);
+    if (remote.slotOrder && !localLiveChanges.has('slotOrder')) setRowOrder(remote.slotOrder);
+    if (remote.overrides && !localLiveChanges.has('overrides')) {
+      setOverrides({ ...DEFAULT_OVERRIDES, ...remote.overrides });
+    }
+    if (remote.timers && !localLiveChanges.has('timers')) {
       setTimers((prev) => {
         const next = { ...prev };
         for (const [row2, t] of Object.entries(remote.timers!)) next[row2] = t;
         return next;
       });
     }
+    const databaseChangedAt = row.last_updated ? new Date(row.last_updated).getTime() : undefined;
+    reportActive(true, databaseChangedAt);
+  });
+
+  useBellRealtime(sessionId, (nextBell) => {
+    setBell(nextBell);
     reportActive(true);
   });
 
-  useBellRealtime(sessionId, setBell);
-
   const announcementSoundRef = useRef<HTMLAudioElement>(null);
   const { send: sendAnnouncementRaw } = useAnnouncementBroadcast(sessionId, (a: AnnouncementPayload) => {
+    reportActive(true);
     if (!prefAnnouncementEnabled) return;
     const text = `${a.senderName}: ${a.message}`;
     if (announcementSoundRef.current) { announcementSoundRef.current.currentTime = 0; announcementSoundRef.current.play().catch(() => {}); }
@@ -415,7 +656,7 @@ export default function SessionOngoingClient(props: Props) {
       setAnnounceBanner(text);
       setTimeout(() => setAnnounceBanner((cur) => (cur === text ? null : cur)), 12000);
     } else {
-      showToast(text);
+      showToast(a.message, 'info', a.senderName);
     }
   });
 
@@ -430,34 +671,48 @@ export default function SessionOngoingClient(props: Props) {
     });
     setAnnounceMessage('');
     setAnnouncePanelOpen(false);
+    reportActive(true);
     showToast('Announcement sent to everyone.');
-  }, [announceMessage, sendAnnouncementRaw, session.host, myClientId, showToast]);
+  }, [announceMessage, sendAnnouncementRaw, session.host, myClientId, reportActive, showToast]);
 
   // ── debounced push (replaces pushState / queueLiveStateSync) ──
-  const pushState = useCallback(async () => {
+  const pushState = useCallback(async (keepalive = false): Promise<boolean> => {
+    if (savePromiseRef.current) return savePromiseRef.current;
     const d = dirtyRef.current;
-    if (!d.live && !d.staffCore && !d.overrides && !d.status && !d.details && !d.attendance && d.traineeRows.size === 0) return;
+    const hasChanges = d.liveFields.size > 0 || d.status || d.details || d.attendance || d.traineeRows.size > 0;
+    if (!hasChanges) return true;
+
+    const versionAtStart = changeVersionRef.current;
+    const dirtyAtStart = {
+      liveFields: new Set(d.liveFields),
+      status: d.status,
+      details: d.details,
+      attendance: d.attendance,
+      traineeRows: new Set(d.traineeRows),
+    };
+    const state = latestSyncStateRef.current;
+    const operation = (async () => {
 
     const updates: Record<string, unknown> = {};
-    if (d.status) updates.session_status = statusValue;
-    if (d.details) {
-      updates.host = session.host;
-      updates.session_date = session.session_date;
-      updates.session_time = session.session_time;
-      updates.trainee_timer = session.trainee_timer;
+    if (dirtyAtStart.status) updates.session_status = state.statusValue;
+    if (dirtyAtStart.details) {
+      updates.host = state.session.host;
+      updates.session_date = state.session.session_date;
+      updates.session_time = state.session.session_time;
+      updates.trainee_timer = state.session.trainee_timer;
     }
-    if (d.attendance) {
-      // one '1'/'0' char per allocated row, in display order — matches the
-      // original's scanTraineeRows() attendanceParts / trainee_attendance column
-      updates.trainee_attendance = rowOrder.map((r) => (attendance[r] ? '1' : '0')).join(',');
+    if (dirtyAtStart.attendance) {
+      for (const row of allTraineeRows) {
+        updates[`trainee_${parseInt(row, 10) + 1}_attended`] = Boolean(state.attendance[row]);
+      }
     }
-    if (d.traineeRows.size > 0) {
-      for (const row of d.traineeRows) {
+    if (dirtyAtStart.traineeRows.size > 0) {
+      for (const row of dirtyAtStart.traineeRows) {
         const idx = parseInt(row, 10) + 1;
-        const detail = traineeDetails[row];
+        const detail = state.traineeDetails[row];
         if (!detail) continue;
         updates[`trainee_${idx}_discord`] = detail.discord;
-        updates[`trainee_${idx}_discord_id`] = detail.discordId;
+        updates[`trainee_${idx}_discord_id`] = detail.discordId.trim() || null;
         updates[`trainee_${idx}_name`] = detail.roblox; // yes — roblox lives under the "_name" column, see TraineeDetail comment above
         updates[`trainee_${idx}_zone`] = detail.zone ? parseInt(detail.zone.replace('Zone ', ''), 10) : null;
         updates[`trainee_${idx}_trainer_name`] = detail.trainerName;
@@ -465,56 +720,86 @@ export default function SessionOngoingClient(props: Props) {
       }
     }
 
-    const live_state: Partial<LiveState> = {
-      timers, drivers, staffShift, feedbackData, completedRows,
-      unallocatedTrainees: unallocated, timeTracker, mainAstNotes, slotOrder: rowOrder,
+      const allLiveState: LiveState = {
+        timers: state.timers,
+        drivers: state.drivers,
+        staffShift: state.staffShift,
+        feedbackData: state.feedbackData,
+        completedRows: state.completedRows,
+        unallocatedTrainees: state.unallocated,
+        timeTracker: state.timeTracker,
+        mainAstNotes: state.mainAstNotes,
+        slotOrder: state.rowOrder,
+        overrides: state.overrides,
+      };
+      const live_state: Partial<LiveState> = {};
+      for (const field of dirtyAtStart.liveFields) {
+        (live_state as Record<string, unknown>)[field] = (allLiveState as Record<string, unknown>)[field];
+      }
+      if (dirtyAtStart.details) live_state.sessionHost = state.session.host;
+      if (dirtyAtStart.attendance || dirtyAtStart.traineeRows.size > 0) {
+        live_state.trainees = Object.fromEntries(
+          allTraineeRows.map((row) => {
+            const detail = state.traineeDetails[row] ?? {
+              discord: '', discordId: '', roblox: '', zone: '', trainerName: '', notes: '',
+            };
+            return [row, { ...detail, attended: Boolean(state.attendance[row]) }];
+          })
+        );
+      }
+
+      try {
+        const response = await fetch(`/api/session/${sessionId}/sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId, updates, live_state }),
+          keepalive,
+        });
+        const result = await response.json().catch(() => null) as { success?: boolean; message?: string } | null;
+        if (!response.ok || !result?.success) {
+          throw new Error(result?.message || `Save failed (${response.status}).`);
+        }
+
+        if (changeVersionRef.current === versionAtStart) {
+          dirtyRef.current = {
+            liveFields: new Set(), status: false, details: false,
+            attendance: false, traineeRows: new Set(),
+          };
+        }
+        lastSyncErrorRef.current = null;
+        return true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown save error.';
+        const previous = lastSyncErrorRef.current;
+        if (!previous || previous.message !== message || Date.now() - previous.at > 10_000) {
+          showToast(`Changes were not saved: ${message}`);
+          lastSyncErrorRef.current = { message, at: Date.now() };
+        }
+        return false;
+      }
+    })();
+
+    savePromiseRef.current = operation;
+    try {
+      return await operation;
+    } finally {
+      if (savePromiseRef.current === operation) savePromiseRef.current = null;
+    }
+  }, [allTraineeRows, sessionId, showToast]);
+
+  useEffect(() => {
+    const id = setInterval(() => { void pushState(); }, 1500);
+    const flushWhenLeaving = () => { void pushState(true); };
+    const flushWhenHidden = () => { if (document.visibilityState === 'hidden') flushWhenLeaving(); };
+    window.addEventListener('pagehide', flushWhenLeaving);
+    document.addEventListener('visibilitychange', flushWhenHidden);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('pagehide', flushWhenLeaving);
+      document.removeEventListener('visibilitychange', flushWhenHidden);
+      flushWhenLeaving();
     };
-    if (d.overrides) live_state.overrides = overrides;
-
-    dirtyRef.current = { live: false, staffCore: false, overrides: false, status: false, details: false, attendance: false, traineeRows: new Set() };
-
-    await fetch(`/api/session/${sessionId}/sync`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: sessionId, updates, live_state }),
-    });
-  }, [sessionId, statusValue, session.host, session.session_date, session.session_time, session.trainee_timer, timers, drivers, staffShift, feedbackData, completedRows, unallocated, timeTracker, mainAstNotes, overrides, rowOrder, attendance, traineeDetails]);
-
-  const queueSync = useCallback(() => { dirtyRef.current.live = true; }, []);
-  // Marks one of the 4 Session Details fields dirty + queues a push, same
-  // gating as the original's `.details-field` class (only sent when the
-  // Override Session Details toggle unlocked them for editing).
-  const queueDetailsSync = useCallback(() => { dirtyRef.current.details = true; }, []);
-
-  useEffect(() => {
-    const id = setInterval(pushState, 3000); // debounce window; realtime handles the pull side now
-    return () => clearInterval(id);
   }, [pushState]);
-
-  // ── global elapsed-time clock (replaces the setInterval on #global-timer-display) ──
-  useEffect(() => {
-    const startMs = session.started_at ? new Date(session.started_at).getTime() : Date.now();
-    const id = setInterval(() => setElapsed(Math.max(0, Math.floor((Date.now() - startMs) / 1000))), 1000);
-    return () => clearInterval(id);
-  }, [session.started_at]);
-
-  // ── overtime flag — measured from the SCHEDULED start (scheduledStartIso),
-  // not from whenever the host actually clicked "Start Session Setup", so
-  // starting early doesn't shift the overtime window. Separate clock from
-  // the elapsed-time display above, same split as the original PHP file. ──
-  const [overtime, setOvertime] = useState(false);
-  useEffect(() => {
-    const scheduledMs = scheduledStartIso
-      ? new Date(scheduledStartIso).getTime()
-      : session.started_at ? new Date(session.started_at).getTime() : Date.now();
-    const durationSeconds = (parseInt(session.session_duration as unknown as string, 10) || 0) * 60;
-    const id = setInterval(() => {
-      if (durationSeconds <= 0) { setOvertime(false); return; }
-      const elapsedSinceScheduled = Math.max(0, Math.floor((Date.now() - scheduledMs) / 1000));
-      setOvertime(elapsedSinceScheduled > durationSeconds);
-    }, 1000);
-    return () => clearInterval(id);
-  }, [scheduledStartIso, session.started_at, session.session_duration]);
 
   // ── signal time apply — replaces applySignalMinutes(): pushes the new
   // per-trainee countdown length and resets every non-running row to it ──
@@ -531,35 +816,24 @@ export default function SessionOngoingClient(props: Props) {
       return next;
     });
     dirtyRef.current.details = true;
-    queueSync();
+    queueSync('timers');
     showToast(`Signal time set to ${minutes} minutes for all trainees.`);
   }, [overrides, session.trainee_timer, queueSync, showToast]);
-
-  // ── 1s ticker for running timers ──
-  useEffect(() => {
-    const id = setInterval(() => {
-      setTimers((prev) => {
-        let changed = false;
-        for (const t of Object.values(prev)) if (t.running) changed = true;
-        return changed ? { ...prev } : prev; // force a re-render; computeCurrentRemaining derives the live value
-      });
-    }, 1000);
-    return () => clearInterval(id);
-  }, []);
 
   // ── overrides ──
   const toggleOverride = useCallback(async (key: keyof OverridesState) => {
     if (!isHost) { showToast('Only the Host can toggle overrides.'); return; }
-    if (key === 'allow-all' && !overrides[key]) {
+    const nextEnabled = !overrides[key];
+    if (key === 'allow-all' && nextEnabled) {
       const ok = await showConfirm(
         "This unlocks every field for every user and bypasses all individual overrides, including host-only ones. This can't be undone quietly — everyone will be able to edit everything.",
         'Allow Override for Everyone?'
       );
       if (!ok) return;
     }
-    setOverrides((prev) => ({ ...prev, [key]: !prev[key] }));
-    dirtyRef.current.overrides = true;
-    queueSync();
+    setOverrides((prev) => ({ ...prev, [key]: nextEnabled }));
+    queueSync('overrides');
+    showToast(`${OVERRIDE_LABELS[key]} ${nextEnabled ? 'enabled' : 'disabled'}.`, nextEnabled ? 'success' : 'warning');
   }, [isHost, overrides, showConfirm, showToast, queueSync]);
 
   const allowAll = overrides['allow-all'];
@@ -573,6 +847,41 @@ export default function SessionOngoingClient(props: Props) {
     slotOrder: !(allowAll || overrides['slot-order']),
     staffDelete: !(allowAll || (isHost && overrides['staff-delete'])),
   };
+  const isMainAst = useMemo(() => staffShift.some((member) =>
+    member.role === 'Main AST' && member.discord.trim().toLowerCase() === myDisplayName.trim().toLowerCase()
+  ), [staffShift, myDisplayName]);
+  const isInternalHelper = useMemo(() => staffShift.some((member) =>
+    member.role === 'Internal Helper' && member.discord.trim().toLowerCase() === myDisplayName.trim().toLowerCase()
+  ), [staffShift, myDisplayName]);
+  const canSeeTimeTracker = isHost || isMainAst || isInternalHelper;
+  const canSeeMainAstNotes = isHost || isMainAst || isInternalHelper;
+  const canAddStaff = overrides['staff-addition'] && (isHost || isMainAst);
+  const trainerOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return [
+      session.host,
+      ...staffShift
+        .filter((member) => member.role === 'Co-Host')
+        .map((member) => member.discord),
+    ].map((name) => name?.trim() ?? '').filter((name) => {
+      const key = name.toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [session.host, staffShift]);
+  const traineeLabel = useCallback((row: string) => {
+    const name = traineeDetails[row]?.discord?.trim();
+    if (name) return name;
+    return standbyRows.includes(row) ? 'standby trainee' : `trainee in slot ${rowOrder.indexOf(row) + 1}`;
+  }, [standbyRows, traineeDetails, rowOrder]);
+
+  const updateTraineeAttendance = useCallback((row: string, attended: boolean) => {
+    setAttendance((prev) => ({ ...prev, [row]: attended }));
+    dirtyRef.current.attendance = true;
+    queueSync();
+    showToast(`${traineeLabel(row)} marked ${attended ? 'present' : 'absent'}.`, attended ? 'success' : 'warning');
+  }, [queueSync, showToast, traineeLabel]);
 
   const allDone = useMemo(() => {
     const rows = Object.keys(completedRows);
@@ -582,34 +891,74 @@ export default function SessionOngoingClient(props: Props) {
 
   // ── trainee timer controls (replace toggleTimer/resetTimer/setTimerValue/recordSetupDone) ──
   const toggleTimer = useCallback((row: string) => {
+    const wasRunning = timers[row]?.running ?? false;
     setTimers((prev) => {
       const t = prev[row] ?? { remainingSeconds: (session.trainee_timer || 12) * 60, running: false, syncedAt: Date.now() };
       if (!t.running) return { ...prev, [row]: { ...t, running: true, syncedAt: Date.now() } };
       return { ...prev, [row]: { ...t, running: false, remainingSeconds: computeCurrentRemaining(t) } };
     });
-    queueSync();
-  }, [queueSync, session.trainee_timer]);
+    queueSync('timers');
+    showToast(`Timer ${wasRunning ? 'paused' : 'started'} for ${traineeLabel(row)}.`, wasRunning ? 'info' : 'success');
+  }, [queueSync, session.trainee_timer, showToast, timers, traineeLabel]);
 
   const resetTimer = useCallback((row: string, totalSeconds: number) => {
     setTimers((prev) => ({ ...prev, [row]: { remainingSeconds: totalSeconds, running: false, syncedAt: Date.now(), setupSeconds: prev[row]?.setupSeconds } }));
-    queueSync();
-  }, [queueSync]);
+    queueSync('timers');
+    showToast(`Timer reset for ${traineeLabel(row)}.`, 'success');
+  }, [queueSync, showToast, traineeLabel]);
 
   const setTimerValue = useCallback((row: string, mmss: string) => {
     const parts = mmss.split(':').map((n) => parseInt(n, 10) || 0);
     const remainingSeconds = parts.length === 2 ? parts[0] * 60 + parts[1] : parseInt(mmss, 10) || 0;
-    setTimers((prev) => ({ ...prev, [row]: { ...prev[row], remainingSeconds, syncedAt: Date.now() } }));
-    queueSync();
-  }, [queueSync]);
+    setTimers((prev) => ({
+      ...prev,
+      [row]: {
+        ...(prev[row] ?? { remainingSeconds, running: false, syncedAt: Date.now() }),
+        remainingSeconds,
+        syncedAt: Date.now(),
+      },
+    }));
+    queueSync('timers');
+    showToast(`Timer updated for ${traineeLabel(row)}.`, 'success');
+  }, [queueSync, showToast, traineeLabel]);
 
   const recordSetupDone = useCallback((row: string, totalSeconds: number) => {
+    if (timers[row]?.setupSeconds != null) return;
     setTimers((prev) => {
       const t = prev[row] ?? { remainingSeconds: totalSeconds, running: false, syncedAt: Date.now() };
+      if (t.setupSeconds != null) return prev;
       const setupSeconds = Math.max(0, totalSeconds - computeCurrentRemaining(t));
       return { ...prev, [row]: { ...t, setupSeconds } };
     });
-    queueSync();
-  }, [queueSync]);
+    queueSync('timers');
+    showToast(`Setup time recorded for ${traineeLabel(row)}.`, 'success');
+  }, [queueSync, showToast, timers, traineeLabel]);
+
+  const editTimeTrackerEntry = useCallback((key: keyof TimeTracker) => {
+    const recordedAt = timeTracker[key];
+    if (!recordedAt) return;
+    const current = formatInstantInSiteTimezone(new Date(recordedAt), timezoneMode, {
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    });
+    const input = window.prompt(`Adjust the logged time (HH:MM ${timezoneMode}):`, current)?.trim();
+    if (input == null) return;
+    const match = /^(?:[01]\d|2[0-3]):[0-5]\d$/.exec(input);
+    if (!match) {
+      showToast('Enter the time in 24-hour HH:MM format.', 'warning');
+      return;
+    }
+    const [currentHour, currentMinute] = current.split(':').map(Number);
+    const [nextHour, nextMinute] = input.split(':').map(Number);
+    let deltaMinutes = (nextHour * 60 + nextMinute) - (currentHour * 60 + currentMinute);
+    if (deltaMinutes > 720) deltaMinutes -= 1440;
+    if (deltaMinutes < -720) deltaMinutes += 1440;
+    setTimeTracker((prev) => ({ ...prev, [key]: recordedAt + deltaMinutes * 60_000 }));
+    queueSync('timeTracker');
+    const label = key === 'briefingStart' ? 'Briefing start' : key === 'sgShiftStart' ? 'SG Shift start' : 'Screenie time';
+    showToast(`${label} adjusted to ${input} ${timezoneMode}.`, 'success');
+  }, [queueSync, showToast, timeTracker, timezoneMode]);
 
   // moveSlot stays here (rather than up with allocatedRows/rowOrder above)
   // since it depends on `locked`, which isn't computed until later in the
@@ -624,30 +973,11 @@ export default function SessionOngoingClient(props: Props) {
       [next[i], next[j]] = [next[j], next[i]];
       return next;
     });
-    queueSync();
-  }, [locked.slotOrder, queueSync]);
+    queueSync('slotOrder');
+    showToast(`${traineeLabel(row)} moved one slot ${dir}.`, 'success');
+  }, [locked.slotOrder, queueSync, showToast, traineeLabel]);
 
   // ── column show/hide — mirrors TRAINEE_COLUMNS / EXTRA_COLUMNS / hide-extras-btn ──
-  const TRAINEE_COLUMNS = [
-    { n: 1, label: 'Pop-out', minWidth: 70, maxWidth: 80, width: 74 },
-    { n: 2, label: 'Slot', minWidth: 64, maxWidth: 80, width: 70 },
-    { n: 3, label: 'Trainee Discord', minWidth: 110, maxWidth: 160, width: 130 },
-    { n: 4, label: 'Discord ID', minWidth: 90, maxWidth: 140, width: 100 },
-    { n: 5, label: 'Roblox', minWidth: 90, maxWidth: 140, width: 100 },
-    { n: 6, label: 'Zone', minWidth: 90, maxWidth: 120, width: 100 },
-    { n: 7, label: 'Timer', minWidth: 190, maxWidth: 220, width: 190 },
-    { n: 8, label: 'Timer Pop-out', minWidth: 120, maxWidth: 140, width: 120 },
-    { n: 9, label: 'Attendance', minWidth: 100, maxWidth: 120, width: 110 },
-    { n: 10, label: 'Trainer', minWidth: 110, maxWidth: 160, width: 126 },
-    { n: 11, label: 'Trainer Discord ID', minWidth: 120, maxWidth: 160, width: 140 },
-    { n: 12, label: 'Feedback', minWidth: 110, maxWidth: 130, width: 110 },
-    { n: 13, label: 'Announcements', minWidth: 160, maxWidth: 240, width: 220 },
-    { n: 14, label: 'Trainee Notes', minWidth: 150, maxWidth: 240, width: 200 },
-    { n: 15, label: 'Completed', minWidth: 100, maxWidth: 130, width: 110 },
-    { n: 16, label: 'Remove', minWidth: 70, maxWidth: 90, width: 80 },
-  ] as const;
-  // Pop-out columns (1, 8) are deliberately excluded from "Hide extras" — same as the original.
-  const EXTRA_COLUMN_NUMS = new Set([2, 4, 9, 11, 14, 16]);
   const [hiddenCols, setHiddenCols] = useState<Set<number>>(new Set());
   const [colWidths, setColWidths] = useState<Record<number, number>>({});
   const [colPickerOpen, setColPickerOpen] = useState(false);
@@ -734,23 +1064,41 @@ export default function SessionOngoingClient(props: Props) {
   const openTraineePip = useCallback((row: string) => { openPip('trainee', row, { width: 320, height: 560, title: 'Trainee pop-out' }); }, [openPip]);
   const openTimerPip = useCallback((row: string) => { openPip('timer', row, { width: 220, height: 210, title: 'Timer pop-out' }); }, [openPip]);
 
+  const removeAllocatedTrainee = useCallback((row: string) => {
+    if (locked.trainees) return;
+    const label = traineeLabel(row);
+    setTraineeDetails((prev) => ({
+      ...prev,
+      [row]: { discord: '', discordId: '', roblox: '', zone: '', trainerName: '', notes: '' },
+    }));
+    setAttendance((prev) => ({ ...prev, [row]: false }));
+    setCompletedRows((prev) => ({ ...prev, [row]: false }));
+    dirtyRef.current.traineeRows.add(row);
+    dirtyRef.current.attendance = true;
+    queueSync('completedRows');
+    showToast(`${label} removed from the slot.`, 'success');
+  }, [locked.trainees, queueSync, showToast, traineeLabel]);
+
   const addUnallocatedTrainee = useCallback(() => {
     if (locked.trainees) return;
     setUnallocated((prev) => [...prev, { uid: newUid(), discord: '', discordId: '', roblox: '', zone: '', notes: '', trainerName: '' }]);
-    queueSync();
-  }, [locked.trainees, queueSync]);
+    queueSync('unallocatedTrainees');
+    showToast('Unallocated trainee added.', 'success');
+  }, [locked.trainees, queueSync, showToast]);
 
   const toggleComplete = useCallback((row: string) => {
     if (isAssistant) return;
+    const willComplete = !completedRows[row];
     setCompletedRows((prev) => ({ ...prev, [row]: !prev[row] }));
-    queueSync();
-  }, [isAssistant, queueSync]);
+    queueSync('completedRows');
+    showToast(`${traineeLabel(row)} marked ${willComplete ? 'completed' : 'not completed'}.`, willComplete ? 'success' : 'warning');
+  }, [isAssistant, queueSync, showToast, completedRows, traineeLabel]);
 
   // ── feedback modal (replaces openFeedbackModal / fb-save et al.) ──
   const getFeedback = useCallback((row: string) => feedbackData[row] ?? { trains: '', setup: '', conflict: '', priority: '', rbtiming: '', overall: '', notes: '' }, [feedbackData]);
   const updateFeedback = useCallback((row: string, field: string, value: string) => {
     setFeedbackData((prev) => ({ ...prev, [row]: { ...getFeedback(row), [field]: value } }));
-    queueSync();
+    queueSync('feedbackData');
   }, [getFeedback, queueSync]);
 
   // Builds the same formatted feedback message the modal's "Copy" button
@@ -767,7 +1115,7 @@ export default function SessionOngoingClient(props: Props) {
 
     return `# Practice Feedback
 **Trainer**: ${detail.trainerName}
-**Date of session**: ${datePart} | ${timePart} BST
+**Date of session**: ${datePart} | ${timePart} ${timezoneMode}
 **Zone**: ${detail.zone}
 **Trains signalled**: ${fb.trains || ''}
 **Set-up time**: ${setupTimeVal}
@@ -794,7 +1142,7 @@ ${fb.notes || ''}
 
 If you believe you were unfairly assessed or have any additional questions, feel free to ask!
 Thank you for attending.`;
-  }, [traineeDetails, buildTraineeDetail, session, getFeedback, timers]);
+  }, [traineeDetails, buildTraineeDetail, session, getFeedback, timers, timezoneMode]);
 
   // ── bell system (replaces ringBell/ackBell/pollBell) ──
   const ringBell = useCallback(async (role: 'host' | 'cohost') => {
@@ -828,7 +1176,7 @@ Thank you for attending.`;
     ref.current.play().catch(() => {});
   }, []);
 
-  const sessionHasCohost = Boolean(session.co_host1 || session.co_host2 || session.co_host3 || session['co_host4/supervisor']);
+  const sessionHasCohost = Boolean(session.co_host1 || session.co_host2 || session.co_host3 || session.co_host4_supervisor);
   const sessionHasAssistant = Boolean(session.assistant_1 || session.assistant_2 || session.assistant_3 || session.assistant_4);
 
   // Replaces the pollBell() diffing logic: watches for active/ack transitions
@@ -896,8 +1244,9 @@ Thank you for attending.`;
       if (!bell?.active || bell.initiator_role === role) ringBell(role);
       else ackBell(role);
     }
+    reportActive(true);
     setBellLocalCooldownUntil((prev) => ({ ...prev, [role]: Date.now() + 5000 }));
-  }, [myRole, bell, ringBell, ackBell, getBellButtonState, showToast]);
+  }, [myRole, bell, ringBell, ackBell, getBellButtonState, reportActive, showToast]);
 
   // ── conclude session (replaces #conclude-session-btn handler) ──
   const [concludeOpen, setConcludeOpen] = useState(false);
@@ -909,9 +1258,12 @@ Thank you for attending.`;
     const ok = await showConfirm(html, 'Conclude this session?');
     if (!ok) return;
 
-    dirtyRef.current.live = true;
-    await pushState();
-    const result = await fetch(`/api/session/${sessionId}/conclude`, {
+    const saved = await pushState();
+    if (!saved) {
+      showToast('Could not conclude because the latest changes are not saved yet.');
+      return;
+    }
+    const result = await fetch(`/api/session/${sessionId}/bell/conclude`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sessionId }),
     }).then((r) => r.json());
@@ -937,10 +1289,36 @@ Thank you for attending.`;
   }, []);
 
   // ── station generator ──
-  const [stationCode, setStationCode] = useState(STATION_LIST[0].code);
+  const [stationName, setStationName] = useState(STATION_LIST[0].name);
+  const handleLockedFieldPointer = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const control = (event.target as HTMLElement).closest('input, select, textarea') as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
+    if (!control?.disabled) return;
+    const configuredReason = control.dataset.lockReason;
+    const isReadOnlyValue = 'readOnly' in control && control.readOnly;
+    let reason: string;
+    if (isReadOnlyValue) {
+      reason = configuredReason || 'This value is filled automatically from the related selection.';
+    } else if (isHost) {
+      if (configuredReason?.startsWith('Session status is locked')) {
+        reason = 'Session status is locked. Enable Override Session Details in Session Controls, or mark every trainee done.';
+      } else if (configuredReason) {
+        reason = configuredReason
+          .replace(/Ask the Host to enable ([^.]+)\.?/i, 'Enable $1 in Session Controls.')
+          .replace(/Ask the Host to turn off ([^.]+)\.?/i, 'Turn off $1 in Session Controls.');
+      } else {
+        reason = 'This field is locked. Enable its corresponding override in Session Controls.';
+      }
+    } else {
+      reason = configuredReason || 'This field is locked by the current session controls. Ask the Host to enable its override.';
+    }
+    showToast(reason, 'warning');
+  }, [isHost, showToast]);
 
   return (
-    <div className={styles.wrap}>
+    <div
+      className={styles.wrap}
+      onPointerDownCapture={handleLockedFieldPointer}
+    >
       {/* AppShell already renders the app-wide header/profile and the
           LIVE SESSION pill, via LiveStatusPill reading the same
           LiveSessionContext this component reports into above. */}
@@ -956,6 +1334,7 @@ Thank you for attending.`;
             <div className={styles.panelTitle}>Session Controls</div>
             <div className={styles.overrideColumns}>
               <div className={styles.overrideCol}>
+                <div className={styles.overrideGroupTitle}>Session</div>
                 <button className={`${styles.ovrBtn} ${overrides['session-details'] ? styles.on : ''}`} onClick={() => toggleOverride('session-details')}>
                   <FontAwesomeIcon icon={ICONS.lock} /> Override Session Details
                 </button>
@@ -970,6 +1349,7 @@ Thank you for attending.`;
                 </button>
               </div>
               <div className={styles.overrideCol}>
+                <div className={styles.overrideGroupTitle}>Assistant Control</div>
                 <button className={`${styles.ovrBtn} ${overrides['staff-roles'] ? styles.on : ''}`} onClick={() => toggleOverride('staff-roles')}>
                   <FontAwesomeIcon icon={ICONS.userShield} /> Allow Assistant Override Staff Roles
                 </button>
@@ -978,6 +1358,7 @@ Thank you for attending.`;
                 </button>
               </div>
               <div className={styles.overrideCol}>
+                <div className={styles.overrideGroupTitle}>Host Control</div>
                 <button className={`${styles.ovrBtn} ${overrides['trainer-details'] ? styles.on : ''}`} onClick={() => toggleOverride('trainer-details')}>
                   <FontAwesomeIcon icon={ICONS.chalkboardUser} /> Override Trainer Assignment
                 </button>
@@ -986,6 +1367,12 @@ Thank you for attending.`;
                 </button>
                 <button className={`${styles.ovrBtn} ${styles.hostOnly} ${styles.dangerous} ${overrides['allow-all'] ? styles.on : ''}`} onClick={() => toggleOverride('allow-all')}>
                   <FontAwesomeIcon icon={ICONS.triangleExclamation} /> Allow Override for Everyone
+                </button>
+                <button
+                  className={`${styles.ovrBtn} ${styles.binaryControl} ${overrides['staff-addition'] ? styles.allowed : styles.denied}`}
+                  onClick={() => toggleOverride('staff-addition')}
+                >
+                  <FontAwesomeIcon icon={ICONS.userPlus} /> Allow Staff Addition
                 </button>
               </div>
             </div>
@@ -1007,6 +1394,7 @@ Thank you for attending.`;
               <select
                 className={styles.cellInput}
                 disabled={locked.sessionDetails}
+                data-lock-reason="Session details are locked. Ask the Host to enable Override Session Details."
                 value={session.host ?? ''}
                 onChange={(e) => {
                   setSession((s) => ({ ...s, host: e.target.value }));
@@ -1023,7 +1411,7 @@ Thank you for attending.`;
             <div className={styles.infoCell}>
               <div className={styles.infoLabel}>Discord ID</div>
               {/* Always locked — auto-synced from the selected Host, same as the original */}
-              <input className={styles.cellInput} readOnly disabled value={staffDirectory[session.host ?? ''] ?? ''} />
+              <input className={styles.cellInput} readOnly disabled data-lock-reason="Discord ID is filled automatically from the selected Session Host." value={staffDirectory[session.host ?? ''] ?? ''} />
             </div>
             <div className={styles.infoCell}>
               <div className={styles.infoLabel}>Session Date</div>
@@ -1031,6 +1419,7 @@ Thank you for attending.`;
                 type="date"
                 className={styles.cellInput}
                 disabled={locked.sessionDetails}
+                data-lock-reason="Session details are locked. Ask the Host to enable Override Session Details."
                 value={session.session_date ?? ''}
                 onChange={(e) => {
                   setSession((s) => ({ ...s, session_date: e.target.value }));
@@ -1046,6 +1435,7 @@ Thank you for attending.`;
                 lang="en-GB"
                 className={styles.cellInput}
                 disabled={locked.sessionDetails}
+                data-lock-reason="Session details are locked. Ask the Host to enable Override Session Details."
                 value={session.session_time ?? ''}
                 onChange={(e) => {
                   setSession((s) => ({ ...s, session_time: e.target.value }));
@@ -1064,7 +1454,15 @@ Thank you for attending.`;
                     className={styles.cellInput}
                     value={statusValue}
                     disabled={!statusUnlocked}
-                    onChange={(e) => { setStatusValue(e.target.value); dirtyRef.current.status = true; queueSync(); }}
+                    data-lock-reason="Session status is locked until the Host enables Session Details or every trainee is marked done."
+                    onChange={(e) => {
+                      const nextStatus = e.currentTarget.value;
+                      const nextLabel = e.currentTarget.options[e.currentTarget.selectedIndex]?.text || nextStatus;
+                      setStatusValue(nextStatus);
+                      dirtyRef.current.status = true;
+                      queueSync();
+                      showToast(`Session status changed to ${nextLabel}.`, 'success');
+                    }}
                   >
                     <option value="inprogress">In Progress</option>
                     <option value="paused">Paused</option>
@@ -1108,10 +1506,15 @@ Thank you for attending.`;
                   max={60}
                   className={`${styles.cellInput} ${styles.signalTimeInput}`}
                   disabled={locked.sessionDetails}
+                  data-lock-reason="Signal time is locked. Ask the Host to enable Override Session Details."
                   value={session.trainee_timer ?? 12}
                   onChange={(e) => {
-                    const val = parseInt(e.target.value, 10);
-                    setSession((s) => ({ ...s, trainee_timer: Number.isNaN(val) ? s.trainee_timer : val }));
+                    const parsed = parseInt(e.currentTarget.value, 10);
+                    if (Number.isNaN(parsed)) return;
+                    const val = Math.max(1, Math.min(60, parsed));
+                    setSession((s) => ({ ...s, trainee_timer: val }));
+                    dirtyRef.current.details = true;
+                    queueSync();
                   }}
                 />
                 <span className={styles.signalTimeSuffix}>min</span>
@@ -1129,42 +1532,17 @@ Thank you for attending.`;
             </div>
             <div className={styles.infoCell} style={{ gridColumn: '4 / 5' }}>
               <div className={styles.infoLabel}>Session Elapsed Time</div>
-              <div className={styles.globalTimerValue}>{fmtHMS(elapsed)}</div>
-              {overtime && (
-                <span className={styles.overtimePill}>
-                  <FontAwesomeIcon icon={ICONS.triangleExclamation} /> Overtime — please pick up the pace and conclude the session now.
-                </span>
-              )}
+              <SessionElapsedClock
+                startedAt={session.started_at}
+                scheduledStartIso={scheduledStartIso}
+                durationMinutes={parseInt(session.session_duration as unknown as string, 10) || 0}
+              />
             </div>
           </div>
         </section>
 
-        {/* ── Time Tracker (host only) ── */}
-        {isHost && (
-          <section className={styles.panel}>
-            <div className={styles.panelTitle}>Time Tracker</div>
-            <div className={styles.timeTrackerGrid}>
-              {(['briefingStart', 'sgShiftStart', 'screenieTime'] as const).map((key) => (
-                <div key={key} className={styles.timeTrackerRow}>
-                  <span className={styles.pipLabel}>
-                    {key === 'briefingStart' ? 'Actual Briefing Start' : key === 'sgShiftStart' ? 'Actual SG Shift Start' : 'Actual Screenie Time'}
-                  </span>
-                  <span className={styles.timeTrackerValue}>
-                    {timeTracker[key] ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(timeTracker[key]) + ' BST/GMT' : '— not recorded —'}
-                  </span>
-                  {!timeTracker[key] && (
-                    <button className={styles.miniOverrideBtn} onClick={() => { setTimeTracker((p) => ({ ...p, [key]: Date.now() })); queueSync(); }}>
-                      <FontAwesomeIcon icon={ICONS.play} />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
         {/* ── Trainees table ── */}
-        <section className={styles.panel}>
+        <section className={`${styles.panel} ${styles.panelAllowOverflow}`}>
           <div className={styles.panelTitle}>
             Trainees Panel
             <div className={styles.columnControls} ref={colPickerRef}>
@@ -1202,11 +1580,10 @@ Thank you for attending.`;
                 </tr>
               </thead>
               <tbody>
-                {rowOrder.map((row, orderIndex) => {
-                  const idx = parseInt(row, 10) + 1;
+                {allTraineeRows.map((row, orderIndex) => {
+                  const isStandby = standbyRows.includes(row);
                   const t = timers[row] ?? { remainingSeconds: (session.trainee_timer || 12) * 60, running: false, syncedAt: Date.now() };
                   const detail = traineeDetails[row] ?? buildTraineeDetail(session, row);
-                  const live = computeCurrentRemaining(t);
                   return (
                     <tr key={row}>
                       {!hiddenCols.has(1) && (
@@ -1218,7 +1595,9 @@ Thank you for attending.`;
                       )}
                       {!hiddenCols.has(2) && (
                         <td>
-                          <div className={styles.slotCell}>
+                          {isStandby ? (
+                            <span className={`${styles.slotNum} ${styles.standbySlot}`}>Standby</span>
+                          ) : <div className={styles.slotCell}>
                             <button
                               type="button"
                               className={`${styles.orderBtn} ${locked.slotOrder ? styles.locked : ''}`}
@@ -1236,7 +1615,7 @@ Thank you for attending.`;
                             >
                               <FontAwesomeIcon icon={ICONS.caretDown} />
                             </button>
-                          </div>
+                          </div>}
                         </td>
                       )}
                       {!hiddenCols.has(3) && (
@@ -1244,6 +1623,7 @@ Thank you for attending.`;
                           <input
                             className={styles.cellInput}
                             disabled={locked.traineeDetails}
+                            data-lock-reason="Trainee details are locked. Ask the Host to enable Override Trainee Details."
                             value={detail.discord}
                             onChange={(e) => updateTraineeDetail(row, { discord: e.target.value })}
                           />
@@ -1254,6 +1634,7 @@ Thank you for attending.`;
                           <input
                             className={styles.cellInput}
                             disabled={locked.traineeDetails}
+                            data-lock-reason="Trainee details are locked. Ask the Host to enable Override Trainee Details."
                             value={detail.discordId}
                             onChange={(e) => updateTraineeDetail(row, { discordId: e.target.value })}
                           />
@@ -1264,6 +1645,7 @@ Thank you for attending.`;
                           <input
                             className={styles.cellInput}
                             disabled={locked.traineeDetails}
+                            data-lock-reason="Trainee details are locked. Ask the Host to enable Override Trainee Details."
                             value={detail.roblox}
                             onChange={(e) => updateTraineeDetail(row, { roblox: e.target.value })}
                           />
@@ -1274,6 +1656,7 @@ Thank you for attending.`;
                           <select
                             className={styles.cellInput}
                             disabled={locked.traineeDetails}
+                            data-lock-reason="Trainee details are locked. Ask the Host to enable Override Trainee Details."
                             value={detail.zone}
                             onChange={(e) => updateTraineeDetail(row, { zone: e.target.value })}
                           >
@@ -1284,24 +1667,37 @@ Thank you for attending.`;
                       )}
                       {!hiddenCols.has(7) && (
                         <td className={styles.timerCell}>
-                          <span className={`${styles.timerDisplay} ${t.running && live > 60 ? styles.running : live <= 0 ? styles.expired : live <= 60 ? styles.low : ''}`}>{fmt(live)}</span>
-                          {!isAssistant && (
-                            <>
-                              <button className={`${styles.timerBtn} ${t.running ? styles.active : ''}`} onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t.running ? ICONS.pause : ICONS.play} /></button>
-                              <button className={styles.timerBtn} onClick={() => resetTimer(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.redo} /></button>
-                              <button className={styles.timerBtn} onClick={() => recordSetupDone(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.check} /></button>
-                              <button
-                                className={styles.timerBtn}
-                                title="Override timer value"
-                                onClick={() => {
-                                  const input = window.prompt('Set timer to MM:SS (e.g. 05:30):', fmt(live));
-                                  if (input !== null) setTimerValue(row, input);
-                                }}
-                              >
-                                <FontAwesomeIcon icon={ICONS.triangleExclamation} />
-                              </button>
-                            </>
-                          )}
+                          <div className={styles.timerCellInner}>
+                            <LiveTimerText
+                              timer={t}
+                              fallbackSeconds={(session.trainee_timer || 12) * 60}
+                              onExpired={() => showToast(`Time is over for ${traineeLabel(row)}.`, 'warning')}
+                            />
+                            {!isAssistant && (
+                              <>
+                                <button className={`${styles.timerBtn} ${t.running ? styles.active : ''}`} onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t.running ? ICONS.pause : ICONS.play} /></button>
+                                <button className={styles.timerBtn} onClick={() => resetTimer(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.redo} /></button>
+                                <button
+                                  className={`${styles.timerBtn} ${t.setupSeconds != null ? styles.recorded : ''}`}
+                                  title={t.setupSeconds != null ? 'Setup time recorded — use Edit in Feedback to change it' : 'Mark setup done'}
+                                  disabled={t.setupSeconds != null}
+                                  onClick={() => recordSetupDone(row, (session.trainee_timer || 12) * 60)}
+                                >
+                                  <FontAwesomeIcon icon={ICONS.check} />
+                                </button>
+                                <button
+                                  className={styles.timerBtn}
+                                  title="Override timer value"
+                                  onClick={() => {
+                                    const input = window.prompt('Set timer to MM:SS (e.g. 05:30):', fmt(computeCurrentRemaining(t)));
+                                    if (input !== null) setTimerValue(row, input);
+                                  }}
+                                >
+                                  <FontAwesomeIcon icon={ICONS.triangleExclamation} />
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </td>
                       )}
                       {!hiddenCols.has(8) && (
@@ -1317,7 +1713,7 @@ Thank you for attending.`;
                             type="checkbox"
                             className={styles.chk}
                             checked={attendance[row] ?? false}
-                            onChange={(e) => { setAttendance((prev) => ({ ...prev, [row]: e.target.checked })); dirtyRef.current.attendance = true; queueSync(); }}
+                            onChange={(e) => updateTraineeAttendance(row, e.currentTarget.checked)}
                           />
                         </td>
                       )}
@@ -1326,12 +1722,15 @@ Thank you for attending.`;
                           <select
                             className={styles.cellInput}
                             disabled={locked.trainerDetails}
-                            value={detail.trainerName}
-                            onChange={(e) => updateTraineeDetail(row, { trainerName: e.target.value })}
+                            data-lock-reason="Trainer assignment is locked. Ask the Host to enable Override Trainer Assignment."
+                            value={trainerOptions.find((name) => name.toLowerCase() === detail.trainerName.trim().toLowerCase()) ?? ''}
+                            onChange={(e) => {
+                              updateTraineeDetail(row, { trainerName: e.target.value });
+                              showToast(`Trainer for ${traineeLabel(row)} switched to ${e.target.value || 'None'}.`, 'success');
+                            }}
                           >
                             <option value="">— None —</option>
-                            <option value={session.host}>{session.host}</option>
-                            {eligibleStaff['Co-Host'].map((n) => <option key={n} value={n}>{n}</option>)}
+                            {trainerOptions.map((name) => <option key={name.toLowerCase()} value={name}>{name}</option>)}
                           </select>
                         </td>
                       )}
@@ -1351,10 +1750,13 @@ Thank you for attending.`;
                         </td>
                       )}
                       {!hiddenCols.has(13) && (
-                        <td>
+                        <td style={{ textAlign: 'center' }}>
                           <div className={styles.announcementCell}>
-                            <button className={styles.announcementCopyBtn} onClick={() => navigator.clipboard.writeText(resolveAnnouncement(row, detail.discord, detail.trainerName, detail.zone))}>
-                              <FontAwesomeIcon icon={ICONS.copy} />
+                            <button
+                              className={`${styles.announcementCopyBtn} ${copiedKey === `announcement-${row}` ? styles.copied : ''}`}
+                              onClick={() => copyWithFeedback(`announcement-${row}`, resolveAnnouncement(row, detail.discord, detail.trainerName, detail.zone), `Announcement for ${traineeLabel(row)}`)}
+                            >
+                              <FontAwesomeIcon icon={copiedKey === `announcement-${row}` ? ICONS.check : ICONS.copy} />
                             </button>
                           </div>
                         </td>
@@ -1378,7 +1780,7 @@ Thank you for attending.`;
                       )}
                       {!hiddenCols.has(16) && (
                         <td style={{ textAlign: 'center' }}>
-                          <button className={styles.rowDelBtn} disabled={locked.trainees}><FontAwesomeIcon icon={ICONS.trash} /></button>
+                          <button className={styles.rowDelBtn} disabled={locked.trainees} onClick={() => removeAllocatedTrainee(row)}><FontAwesomeIcon icon={ICONS.trash} /></button>
                         </td>
                       )}
                     </tr>
@@ -1393,8 +1795,9 @@ Thank you for attending.`;
                         <input
                           className={styles.cellInput}
                           disabled={locked.traineeDetails}
+                          data-lock-reason="Trainee details are locked. Ask the Host to enable Override Trainee Details."
                           value={u.discord}
-                          onChange={(e) => { setUnallocated((prev) => prev.map((x) => x.uid === u.uid ? { ...x, discord: e.target.value } : x)); queueSync(); }}
+                          onChange={(e) => { setUnallocated((prev) => prev.map((x) => x.uid === u.uid ? { ...x, discord: e.target.value } : x)); queueSync('unallocatedTrainees'); }}
                         />
                       </td>
                     )}
@@ -1403,8 +1806,9 @@ Thank you for attending.`;
                         <input
                           className={styles.cellInput}
                           disabled={locked.traineeDetails}
+                          data-lock-reason="Trainee details are locked. Ask the Host to enable Override Trainee Details."
                           value={u.discordId}
-                          onChange={(e) => { setUnallocated((prev) => prev.map((x) => x.uid === u.uid ? { ...x, discordId: e.target.value } : x)); queueSync(); }}
+                          onChange={(e) => { setUnallocated((prev) => prev.map((x) => x.uid === u.uid ? { ...x, discordId: e.target.value } : x)); queueSync('unallocatedTrainees'); }}
                         />
                       </td>
                     )}
@@ -1413,8 +1817,9 @@ Thank you for attending.`;
                         <input
                           className={styles.cellInput}
                           disabled={locked.traineeDetails}
+                          data-lock-reason="Trainee details are locked. Ask the Host to enable Override Trainee Details."
                           value={u.roblox}
-                          onChange={(e) => { setUnallocated((prev) => prev.map((x) => x.uid === u.uid ? { ...x, roblox: e.target.value } : x)); queueSync(); }}
+                          onChange={(e) => { setUnallocated((prev) => prev.map((x) => x.uid === u.uid ? { ...x, roblox: e.target.value } : x)); queueSync('unallocatedTrainees'); }}
                         />
                       </td>
                     )}
@@ -1423,8 +1828,9 @@ Thank you for attending.`;
                         <select
                           className={styles.cellInput}
                           disabled={locked.traineeDetails}
+                          data-lock-reason="Trainee details are locked. Ask the Host to enable Override Trainee Details."
                           value={u.zone}
-                          onChange={(e) => { setUnallocated((prev) => prev.map((x) => x.uid === u.uid ? { ...x, zone: e.target.value } : x)); queueSync(); }}
+                          onChange={(e) => { setUnallocated((prev) => prev.map((x) => x.uid === u.uid ? { ...x, zone: e.target.value } : x)); queueSync('unallocatedTrainees'); }}
                         >
                           <option value="">Select</option>{ZONES.map((z) => <option key={z} value={z}>{z}</option>)}
                         </select>
@@ -1437,7 +1843,7 @@ Thank you for attending.`;
                           className={styles.cellInput}
                           rows={1}
                           value={u.notes}
-                          onChange={(e) => { setUnallocated((prev) => prev.map((x) => x.uid === u.uid ? { ...x, notes: e.target.value } : x)); queueSync(); }}
+                          onChange={(e) => { setUnallocated((prev) => prev.map((x) => x.uid === u.uid ? { ...x, notes: e.target.value } : x)); queueSync('unallocatedTrainees'); }}
                         />
                       </td>
                     )}
@@ -1447,7 +1853,11 @@ Thank you for attending.`;
                         <button
                           className={styles.rowDelBtn}
                           disabled={locked.trainees}
-                          onClick={() => { setUnallocated((prev) => prev.filter((x) => x.uid !== u.uid)); queueSync(); }}
+                          onClick={() => {
+                            setUnallocated((prev) => prev.filter((x) => x.uid !== u.uid));
+                            queueSync('unallocatedTrainees');
+                            showToast(`${u.discord || 'Unallocated trainee'} removed.`, 'success');
+                          }}
                         >
                           <FontAwesomeIcon icon={ICONS.trash} />
                         </button>
@@ -1478,22 +1888,27 @@ Thank you for attending.`;
               <tbody>
                 {drivers.map((d, i) => (
                   <tr key={i}>
-                    <td><input className={styles.cellInput} disabled={locked.driversDisabled} defaultValue={d.discord}
-                      onBlur={(e) => { setDrivers((p) => p.map((x, j) => j === i ? { ...x, discord: e.target.value } : x)); queueSync(); }} /></td>
-                    <td><input className={styles.cellInput} disabled={locked.driversDisabled} defaultValue={d.roblox}
-                      onBlur={(e) => { setDrivers((p) => p.map((x, j) => j === i ? { ...x, roblox: e.target.value } : x)); queueSync(); }} /></td>
+                    <td><input className={styles.cellInput} disabled={locked.driversDisabled} data-lock-reason="Driver input is disabled. Ask the Host to turn off Disable Assistant Input on Drivers." value={d.discord}
+                      onChange={(e) => { setDrivers((p) => p.map((x, j) => j === i ? { ...x, discord: e.target.value } : x)); queueSync('drivers'); }} /></td>
+                    <td><input className={styles.cellInput} disabled={locked.driversDisabled} data-lock-reason="Driver input is disabled. Ask the Host to turn off Disable Assistant Input on Drivers." value={d.roblox}
+                      onChange={(e) => { setDrivers((p) => p.map((x, j) => j === i ? { ...x, roblox: e.target.value } : x)); queueSync('drivers'); }} /></td>
                     <td style={{ textAlign: 'center' }}>
-                      <input type="checkbox" className={styles.chk} disabled={locked.driversDisabled} checked={d.attended}
-                        onChange={(e) => { setDrivers((p) => p.map((x, j) => j === i ? { ...x, attended: e.target.checked } : x)); queueSync(); }} />
+                      <input type="checkbox" className={styles.chk} disabled={locked.driversDisabled} data-lock-reason="Driver input is disabled. Ask the Host to turn off Disable Assistant Input on Drivers." checked={d.attended}
+                        onChange={(e) => {
+                          const attended = e.currentTarget.checked;
+                          setDrivers((p) => p.map((x, j) => j === i ? { ...x, attended } : x));
+                          queueSync('drivers');
+                          showToast(`${d.discord || 'Driver'} marked ${attended ? 'present' : 'absent'}.`, attended ? 'success' : 'warning');
+                        }} />
                     </td>
-                    <td><button className={styles.rowDelBtn} onClick={() => { setDrivers((p) => p.filter((_, j) => j !== i)); queueSync(); }}><FontAwesomeIcon icon={ICONS.trash} /></button></td>
+                    <td><button className={styles.rowDelBtn} onClick={() => { setDrivers((p) => p.filter((_, j) => j !== i)); queueSync('drivers'); showToast(`${d.discord || 'Driver'} removed.`, 'success'); }}><FontAwesomeIcon icon={ICONS.trash} /></button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
             </div>
             <div className={styles.addRowBar}>
-              <button className={styles.addBtn} onClick={() => { setDrivers((p) => [...p, { discord: '', roblox: '', attended: false }]); queueSync(); }}>
+              <button className={styles.addBtn} onClick={() => { setDrivers((p) => [...p, { discord: '', roblox: '', attended: false }]); queueSync('drivers'); showToast('Driver added.', 'success'); }}>
                 <FontAwesomeIcon icon={ICONS.plus} /> Add driver
               </button>
             </div>
@@ -1508,25 +1923,30 @@ Thank you for attending.`;
                 {staffShift.map((s, i) => (
                   <tr key={i}>
                     <td>
-                      <select className={styles.cellInput} disabled={locked.staffRoles} value={s.role}
-                        onChange={(e) => { setStaffShift((p) => p.map((x, j) => j === i ? { ...x, role: e.target.value as StaffShiftRow['role'] } : x)); dirtyRef.current.staffCore = true; queueSync(); }}>
+                      <select className={styles.cellInput} disabled={locked.staffRoles} data-lock-reason="Staff roles are locked. Ask the Host to enable Allow Assistant Override Staff Roles." value={s.role}
+                        onChange={(e) => { setStaffShift((p) => p.map((x, j) => j === i ? { ...x, role: e.target.value as StaffShiftRow['role'] } : x)); queueSync('staffShift'); }}>
                         {STAFF_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                       </select>
                     </td>
                     <td>
                       <select className={styles.cellInput} value={s.discord}
-                        onChange={(e) => { setStaffShift((p) => p.map((x, j) => j === i ? { ...x, discord: e.target.value } : x)); dirtyRef.current.staffCore = true; queueSync(); }}>
+                        onChange={(e) => { setStaffShift((p) => p.map((x, j) => j === i ? { ...x, discord: e.target.value } : x)); queueSync('staffShift'); }}>
                         <option value="">— Select —</option>
                         {(s.role === 'Co-Host' ? eligibleStaff['Co-Host'] : s.role === 'Assistant' ? eligibleStaff.Assistant : Object.keys(staffDirectory)).map((n) => <option key={n} value={n}>{n}</option>)}
                       </select>
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <input type="checkbox" className={styles.chk} checked={s.attended}
-                        onChange={(e) => { setStaffShift((p) => p.map((x, j) => j === i ? { ...x, attended: e.target.checked } : x)); queueSync(); }} />
+                        onChange={(e) => {
+                          const attended = e.currentTarget.checked;
+                          setStaffShift((p) => p.map((x, j) => j === i ? { ...x, attended } : x));
+                          queueSync('staffShift');
+                          showToast(`${s.discord || 'Staff member'} marked ${attended ? 'present' : 'absent'}.`, attended ? 'success' : 'warning');
+                        }} />
                     </td>
-                    <td><input className={styles.cellInput} defaultValue={s.notes} onBlur={(e) => { setStaffShift((p) => p.map((x, j) => j === i ? { ...x, notes: e.target.value } : x)); queueSync(); }} /></td>
+                    <td><input className={styles.cellInput} value={s.notes} onChange={(e) => { setStaffShift((p) => p.map((x, j) => j === i ? { ...x, notes: e.target.value } : x)); queueSync('staffShift'); }} /></td>
                     <td>
-                      <button className={styles.rowDelBtn} disabled={locked.staffDelete} onClick={() => { setStaffShift((p) => p.filter((_, j) => j !== i)); dirtyRef.current.staffCore = true; queueSync(); }}>
+                      <button className={styles.rowDelBtn} disabled={locked.staffDelete} onClick={() => { setStaffShift((p) => p.filter((_, j) => j !== i)); queueSync('staffShift'); showToast(`${s.discord || 'Staff member'} removed.`, 'success'); }}>
                         <FontAwesomeIcon icon={ICONS.trash} />
                       </button>
                     </td>
@@ -1536,61 +1956,118 @@ Thank you for attending.`;
             </table>
             </div>
             <div className={styles.addRowBar}>
-              <button className={styles.addBtn} disabled={staffShift.length >= 10}
-                onClick={() => { setStaffShift((p) => [...p, { role: 'Assistant', discord: '', notes: '', attended: false }]); dirtyRef.current.staffCore = true; queueSync(); }}>
+              <button
+                className={`${styles.addBtn} ${!canAddStaff || staffShift.length >= 10 ? styles.locked : ''}`}
+                aria-disabled={!canAddStaff || staffShift.length >= 10}
+                onClick={() => {
+                  if (!overrides['staff-addition']) {
+                    showToast('Staff addition is disabled by the Host.', 'warning');
+                    return;
+                  }
+                  if (!isHost && !isMainAst) {
+                    showToast('Only the Host or the current Main AST can add staff.', 'warning');
+                    return;
+                  }
+                  if (staffShift.length >= 10) {
+                    showToast('The staff panel already has its maximum of 10 members.', 'warning');
+                    return;
+                  }
+                  setStaffShift((p) => [...p, { role: 'Assistant', discord: '', notes: '', attended: false }]);
+                  queueSync('staffShift');
+                  showToast('Staff member added.', 'success');
+                }}
+              >
                 <FontAwesomeIcon icon={ICONS.plus} /> Add staff member
               </button>
             </div>
           </section>
         </div>
 
-        {/* ── Station generator ── */}
-        <section className={styles.panel}>
-          <div className={styles.panelTitle}><FontAwesomeIcon icon={ICONS.cameraRetro} /> Screenshot Station</div>
-          <div className={styles.stationGenRow}>
-            <select className={styles.cellInput} value={stationCode} onChange={(e) => setStationCode(e.target.value)}>
-              {STATION_LIST.map((s) => <option key={s.code} value={s.code}>{s.code} — {s.name}</option>)}
-            </select>
-            <button className={styles.miniOverrideBtn} onClick={() => setStationCode(STATION_LIST[Math.floor(Math.random() * STATION_LIST.length)].code)}>
-              <FontAwesomeIcon icon={ICONS.shuffle} />
-            </button>
-            <button className={styles.announcementCopyBtn} onClick={() => {
-              const station = STATION_LIST.find((s) => s.code === stationCode)!;
-              navigator.clipboard.writeText(buildStationAnnouncement(station));
-            }}>
-              <FontAwesomeIcon icon={ICONS.copy} />
-            </button>
-          </div>
-        </section>
+        {/* ── Time tracker and station generator ── */}
+        <div className={styles.sideBySidePanels}>
+          {canSeeTimeTracker && (
+            <section className={styles.panel}>
+              <div className={styles.panelTitle}>Time Tracker</div>
+              <div className={styles.timeTrackerGrid}>
+                {(['briefingStart', 'sgShiftStart', 'screenieTime'] as const).map((key) => (
+                  <div key={key} className={styles.timeTrackerRow}>
+                    <span className={styles.pipLabel}>
+                      {key === 'briefingStart' ? 'Actual Briefing Start' : key === 'sgShiftStart' ? 'Actual SG Shift Start' : 'Actual Screenie Time'}
+                    </span>
+                    <span className={`${styles.timeTrackerValue} ${timeTracker[key] ? styles.recorded : ''}`}>
+                      {timeTracker[key]
+                        ? `${formatInstantInSiteTimezone(new Date(timeTracker[key] as number), timezoneMode, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })} ${timezoneMode}`
+                        : '— not recorded —'}
+                    </span>
+                    {timeTracker[key] ? (
+                      <>
+                        <button className={`${styles.miniOverrideBtn} ${styles.recorded}`} disabled title="Time recorded">
+                          <FontAwesomeIcon icon={ICONS.check} />
+                        </button>
+                        <button className={styles.miniOverrideBtn} title="Edit recorded time" onClick={() => editTimeTrackerEntry(key)}>
+                          <FontAwesomeIcon icon={ICONS.pen} />
+                        </button>
+                      </>
+                    ) : (
+                      <button className={styles.miniOverrideBtn} onClick={() => { setTimeTracker((p) => ({ ...p, [key]: Date.now() })); queueSync('timeTracker'); }}>
+                        <FontAwesomeIcon icon={ICONS.play} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
-        {/* ── Conclude ── */}
-        {isHost && (
           <section className={styles.panel}>
-            <div className={styles.panelTitle}>Session Wrap-Up</div>
-            <div className={styles.concludePanelBody}>
-              <p className={styles.concludeDesc}>Concluding the session finalizes it — only available while In Progress or Cancelled.</p>
-              <button className={styles.mbtnDanger} disabled={!concludeUnlocked} onClick={concludeSession}>
-                <FontAwesomeIcon icon={ICONS.flagCheckered} /> Conclude Session
+            <div className={styles.panelTitle}><FontAwesomeIcon icon={ICONS.cameraRetro} /> Screenshot Station</div>
+            <div className={styles.stationGenRow}>
+              <select className={styles.cellInput} value={stationName} onChange={(e) => setStationName(e.target.value)}>
+                {STATION_LIST.map((s) => <option key={s.name} value={s.name}>{s.code} — {s.name}</option>)}
+              </select>
+              <button className={styles.miniOverrideBtn} onClick={() => setStationName(STATION_LIST[Math.floor(Math.random() * STATION_LIST.length)].name)}>
+                <FontAwesomeIcon icon={ICONS.shuffle} />
+              </button>
+              <button className={`${styles.announcementCopyBtn} ${copiedKey === 'station' ? styles.copied : ''}`} onClick={() => {
+                const station = STATION_LIST.find((s) => s.name === stationName)!;
+                void copyWithFeedback('station', buildStationAnnouncement(station), 'Station announcement');
+              }}>
+                <FontAwesomeIcon icon={copiedKey === 'station' ? ICONS.check : ICONS.copy} />
               </button>
             </div>
           </section>
-        )}
+        </div>
 
-        {/* ── Main AST notes ── */}
-        <section className={styles.panel}>
-          <div className={styles.panelTitle}>Main AST Notes</div>
-          <textarea
-            className={styles.cellInput}
-            rows={6}
-            style={{ width: '100%' }}
-            value={mainAstNotes}
-            onChange={(e) => { setMainAstNotes(e.target.value); queueSync(); }}
-          />
-          {isHost && (
-            <button
-              className={styles.mbtnPrimary}
-              style={{ marginTop: 10 }}
-              onClick={() => {
+        {/* ── Wrap-up and Main AST notes ── */}
+        {(isHost || canSeeMainAstNotes) && (
+          <div className={styles.sideBySidePanels}>
+            {isHost && (
+              <section className={styles.panel}>
+                <div className={styles.panelTitle}>Session Wrap-Up</div>
+                <div className={styles.concludePanelBody}>
+                  <p className={styles.concludeDesc}>Concluding the session finalizes it — only available while In Progress or Cancelled.</p>
+                  <button className={styles.mbtnDanger} disabled={!concludeUnlocked} onClick={concludeSession}>
+                    <FontAwesomeIcon icon={ICONS.flagCheckered} /> Conclude Session
+                  </button>
+                </div>
+              </section>
+            )}
+
+            {canSeeMainAstNotes && (
+              <section className={styles.panel}>
+                <div className={styles.panelTitle}>Main AST Notes</div>
+                <textarea
+                  className={styles.cellInput}
+                  rows={6}
+                  style={{ width: '100%' }}
+                  value={mainAstNotes}
+                  onChange={(e) => { setMainAstNotes(e.target.value); queueSync('mainAstNotes'); }}
+                />
+                {isHost && (
+                  <button
+                    className={styles.mbtnPrimary}
+                    style={{ marginTop: 10 }}
+                    onClick={() => {
                 const mainAstList = staffShift.filter((s) => s.role === 'Main AST').map((s) => s.discord).filter(Boolean);
                 const mainAst = mainAstList[0] || '';
                 const assistants = staffShift.filter((s) => s.role === 'Assistant').map((s) => s.discord).filter(Boolean);
@@ -1617,6 +2094,7 @@ Thank you for attending.`;
                 const drivers_ = drivers.map((d) => d.discord).filter(Boolean);
 
                 const text = buildReportText({
+                  timezoneMode,
                   hostName: session.host,
                   sessionDateIso: session.session_date,
                   timeTracker,
@@ -1632,12 +2110,15 @@ Thank you for attending.`;
                 });
 
                 navigator.clipboard.writeText(text).then(() => showToast('Report copied to clipboard!')).catch(() => showToast('Could not copy — check clipboard permissions.'));
-              }}
-            >
-              <FontAwesomeIcon icon={ICONS.clipboardList} /> Generate Report
-            </button>
-          )}
-        </section>
+                    }}
+                  >
+                    <FontAwesomeIcon icon={ICONS.clipboardList} /> Generate Report
+                  </button>
+                )}
+              </section>
+            )}
+          </div>
+        )}
       </main>
 
       {/* ── Bell widget ── */}
@@ -1736,10 +2217,20 @@ Thank you for attending.`;
       </div>
 
       {/* ── Toasts ── */}
-      <div className={styles.toastContainer}>
+      <div className={styles.toastContainer} aria-live="polite" aria-atomic="false">
         {toasts.map((t) => (
-          <div key={t.id} className={`${styles.toast} ${styles.show}`}>
-            <div className={styles.toastMsg}><FontAwesomeIcon icon={ICONS.lock} /> {t.message}</div>
+          <div key={t.id} className={`${styles.toast} ${styles.show} ${styles[t.kind]}`}>
+            <div className={styles.toastMsg}>
+              <FontAwesomeIcon icon={t.kind === 'success' ? ICONS.check : t.kind === 'info' ? ICONS.circleDot : ICONS.triangleExclamation} />
+              <div className={styles.toastText}>
+                <span className={styles.toastActor}>{t.actorName}</span>
+                <span>{t.message}</span>
+              </div>
+            </div>
+            <button type="button" className={styles.toastDismiss} aria-label="Dismiss notification" onClick={() => dismissToast(t.id)}>
+              <FontAwesomeIcon icon={ICONS.xmark} />
+            </button>
+            <div className={styles.toastTimer} />
           </div>
         ))}
       </div>
@@ -1765,7 +2256,6 @@ Thank you for attending.`;
         const row = feedbackModalRow;
         const detail = traineeDetails[row] ?? buildTraineeDetail(session, row);
         const t = timers[row];
-        const live = t ? computeCurrentRemaining(t) : 0;
         const setupDone = t?.setupSeconds != null;
         const totalSeconds = (session.trainee_timer || 12) * 60;
         return (
@@ -1817,7 +2307,7 @@ Thank you for attending.`;
                           const parts = input.split(':').map((n) => parseInt(n, 10) || 0);
                           const secs = parts.length === 2 ? parts[0] * 60 + parts[1] : parseInt(input, 10) || 0;
                           setTimers((prev) => ({ ...prev, [row]: { ...prev[row], setupSeconds: secs } }));
-                          queueSync();
+                          queueSync('timers');
                         }}
                       >
                         <FontAwesomeIcon icon={ICONS.triangleExclamation} />
@@ -1832,7 +2322,7 @@ Thank you for attending.`;
                       onClick={() => {
                         navigator.clipboard.writeText(buildFeedbackMessageForRow(row)).then(() => {
                           setModalCopyFlash(true);
-                          showToast('Feedback message copied.');
+                          showToast('Feedback message copied successfully.', 'success');
                           setTimeout(() => setModalCopyFlash(false), 1200);
                         });
                       }}
@@ -1846,7 +2336,10 @@ Thank you for attending.`;
                 {/* mirrors the trainee row's timer — no need to close the modal */}
                 <div className={styles.modalTimerBox}>
                   <span className={styles.modalTimerLabel}>Trainee Timer</span>
-                  <span className={`${styles.timerDisplay} ${t?.running && live > 60 ? styles.running : live <= 0 ? styles.expired : live <= 60 ? styles.low : ''}`}>{fmt(live)}</span>
+                  <LiveTimerText
+                    timer={t}
+                    fallbackSeconds={totalSeconds}
+                  />
                   <button className={`${styles.timerBtn} ${t?.running ? styles.active : ''}`} title="Start/pause" onClick={() => toggleTimer(row)}>
                     <FontAwesomeIcon icon={t?.running ? ICONS.pause : ICONS.play} />
                   </button>
@@ -1854,22 +2347,24 @@ Thank you for attending.`;
                     <FontAwesomeIcon icon={ICONS.redo} />
                   </button>
                   <button
-                    className={styles.timerBtn}
-                    title="Mark setup done"
+                    className={`${styles.timerBtn} ${setupDone ? styles.recorded : ''}`}
+                    title={setupDone ? 'Setup time recorded — use the edit button above to change it' : 'Mark setup done'}
+                    aria-label={setupDone ? 'Setup time recorded' : 'Mark setup done'}
                     disabled={setupDone}
                     onClick={() => { if (!setupDone) recordSetupDone(row, totalSeconds); }}
                   >
-                    <FontAwesomeIcon icon={ICONS.check} /> {setupDone ? 'Setup Done' : 'Mark setup done'}
+                    <FontAwesomeIcon icon={ICONS.check} />
                   </button>
                   <button
                     className={styles.timerBtn}
                     title="Override timer value"
+                    aria-label="Override timer value"
                     onClick={() => {
-                      const input = window.prompt('Set timer to MM:SS (e.g. 05:30):', fmt(live));
+                      const input = window.prompt('Set timer to MM:SS (e.g. 05:30):', fmt(t ? computeCurrentRemaining(t) : totalSeconds));
                       if (input !== null) setTimerValue(row, input);
                     }}
                   >
-                    <FontAwesomeIcon icon={ICONS.triangleExclamation} /> Override
+                    <FontAwesomeIcon icon={ICONS.triangleExclamation} />
                   </button>
                 </div>
 
@@ -1887,7 +2382,14 @@ Thank you for attending.`;
                       </button>
                       <span className={styles.scriptHint}>read-only — tap the copy icon on a line</span>
                     </div>
-                    {scriptVisible && <ScriptPreview minutes={session.trainee_timer || 12} win={window} />}
+                    {scriptVisible && (
+                      <ScriptPreview
+                        minutes={session.trainee_timer || 12}
+                        win={window}
+                        traineeName={detail.discord}
+                        location={detail.zone}
+                      />
+                    )}
                   </div>
 
                   <div>
@@ -1921,7 +2423,6 @@ Thank you for attending.`;
           const win = pipWindow;
           const detail = traineeDetails[row] ?? buildTraineeDetail(session, row);
           const t = timers[row];
-          const live = t ? computeCurrentRemaining(t) : 0;
           const fb = getFeedback(row);
           const done = completedRows[row];
           return (
@@ -1935,11 +2436,21 @@ Thank you for attending.`;
               </div>
 
               {t && (
-                <div className={styles.timerCell} style={{ marginTop: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-                  <span className={`${styles.timerDisplay} ${t.running && live > 60 ? styles.running : live <= 0 ? styles.expired : live <= 60 ? styles.low : ''}`}>{fmt(live)}</span>
+                <div className={styles.timerCellInner} style={{ marginTop: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <LiveTimerText
+                    timer={t}
+                    fallbackSeconds={(session.trainee_timer || 12) * 60}
+                  />
                   <button className={`${styles.timerBtn} ${t.running ? styles.active : ''}`} onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t.running ? ICONS.pause : ICONS.play} /></button>
                   <button className={styles.timerBtn} onClick={() => resetTimer(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.redo} /></button>
-                  <button className={styles.timerBtn} onClick={() => recordSetupDone(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.check} /></button>
+                  <button
+                    className={`${styles.timerBtn} ${t.setupSeconds != null ? styles.recorded : ''}`}
+                    title={t.setupSeconds != null ? 'Setup time recorded — use the edit button below to change it' : 'Mark setup done'}
+                    disabled={t.setupSeconds != null}
+                    onClick={() => recordSetupDone(row, (session.trainee_timer || 12) * 60)}
+                  >
+                    <FontAwesomeIcon icon={ICONS.check} />
+                  </button>
                 </div>
               )}
 
@@ -1959,7 +2470,7 @@ Thank you for attending.`;
                         const parts = input.split(':').map((n) => parseInt(n, 10) || 0);
                         const secs = parts.length === 2 ? parts[0] * 60 + parts[1] : parseInt(input, 10) || 0;
                         setTimers((prev) => ({ ...prev, [row]: { ...prev[row], setupSeconds: secs } }));
-                        queueSync();
+                        queueSync('timers');
                       }}
                     >
                       <FontAwesomeIcon icon={ICONS.pen} />
@@ -1974,7 +2485,7 @@ Thank you for attending.`;
                   type="checkbox"
                   className={styles.chk}
                   checked={attendance[row] ?? false}
-                  onChange={(e) => { setAttendance((prev) => ({ ...prev, [row]: e.target.checked })); dirtyRef.current.attendance = true; queueSync(); }}
+                  onChange={(e) => updateTraineeAttendance(row, e.currentTarget.checked)}
                 />
               </div>
 
@@ -2001,7 +2512,14 @@ Thank you for attending.`;
                     <FontAwesomeIcon icon={pipScriptVisible ? ICONS.eyeSlash : ICONS.eye} />
                   </button>
                 </div>
-                {pipScriptVisible && <ScriptPreview minutes={session.trainee_timer || 12} win={win} />}
+                {pipScriptVisible && (
+                  <ScriptPreview
+                    minutes={session.trainee_timer || 12}
+                    win={win}
+                    traineeName={detail.discord}
+                    location={detail.zone}
+                  />
+                )}
               </div>
 
               <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,.1)', paddingTop: 10 }}>
@@ -2012,9 +2530,10 @@ Thank you for attending.`;
                     className={`${styles.copyFeedbackBtn} ${pipCopyFlash ? styles.copied : ''}`}
                     title="Copy full feedback message"
                     onClick={() => {
-                      win.navigator.clipboard.writeText(buildFeedbackMessageForRow(row)).then(() => {
-                        setPipCopyFlash(true);
-                        setTimeout(() => setPipCopyFlash(false), 1200);
+                       win.navigator.clipboard.writeText(buildFeedbackMessageForRow(row)).then(() => {
+                         setPipCopyFlash(true);
+                         showToast('Feedback message copied successfully.', 'success');
+                         setTimeout(() => setPipCopyFlash(false), 1200);
                       });
                     }}
                   >
@@ -2059,23 +2578,26 @@ Thank you for attending.`;
           const row = pipRow;
           const win = pipWindow;
           const t = timers[row];
-          const live = t ? computeCurrentRemaining(t) : 0;
           const detail = traineeDetails[row] ?? buildTraineeDetail(session, row);
           const canControl = myRole !== 'assistant';
           return (
             <div style={{ padding: 16, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
               <div style={{ fontSize: '.8rem', color: 'rgba(255,255,255,.32)' }}>{detail.discord || `Trainee ${parseInt(row, 10) + 1}`}</div>
               {t && (
-                <span className={`${styles.timerDisplay} ${t.running && live > 60 ? styles.running : live <= 0 ? styles.expired : live <= 60 ? styles.low : ''}`} style={{ fontSize: '2rem' }}>{fmt(live)}</span>
+                <LiveTimerText
+                  timer={t}
+                  fallbackSeconds={(session.trainee_timer || 12) * 60}
+                  large
+                />
               )}
               {canControl ? (
-                <div className={styles.timerCell} style={{ justifyContent: 'center' }}>
+                <div className={styles.timerCellInner} style={{ justifyContent: 'center' }}>
                   <button className={`${styles.timerBtn} ${t?.running ? styles.active : ''}`} onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t?.running ? ICONS.pause : ICONS.play} /></button>
                   <button className={styles.timerBtn} onClick={() => resetTimer(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.redo} /></button>
                   <button
                     className={styles.timerBtn}
                     onClick={() => {
-                      const input = win.prompt('Set timer to MM:SS:', fmt(live));
+                      const input = win.prompt('Set timer to MM:SS:', fmt(t ? computeCurrentRemaining(t) : (session.trainee_timer || 12) * 60));
                       if (input !== null) setTimerValue(row, input);
                     }}
                   >

@@ -3,13 +3,12 @@ import { getCurrentUser } from '@/lib/getCurrentUser';
 import { formatNameWithPrefix, getRoleLabel } from '@/lib/roles';
 import AppShell, { type AssignedSession } from './AppShell';
 import { createClient } from '@/utils/supabase/server';
-
-const STAFF_COLUMNS =
-  'host, co_host1, co_host2, co_host3, co_host4_supervisor, assistant_1, assistant_2, assistant_3, assistant_4, additional_staff';
+import { currentSiteTimeParts, getSiteTimezoneMode } from '@/lib/siteTimezone';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser(); // redirects to /login internally if not signed in
   const supabase = await createClient();
+  const timezoneMode = await getSiteTimezoneMode(supabase);
 
   const roleInfo = { rawRole: user.effectiveRole, isStaff: user.viewingAs ? user.effectivePermLevel > 0 : user.isStaff, isAdmin: user.viewingAs ? false : user.isAdmin };
   const displayName = formatNameWithPrefix(user.effectiveUsername, roleInfo);
@@ -34,9 +33,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   if (myDisplayName) {
-    const nowBST = new Date();
-    const todayBST = nowBST.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
-    const nowTimeBST = nowBST.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour12: false });
+    const { date: todayBST, time: nowTimeBST } = currentSiteTimeParts(timezoneMode);
 
     const { data: staffRows, error: staffErr } = await supabase
       .from('session_staff')
@@ -49,21 +46,41 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       const roleBySession = new Map(staffRows.map((r) => [r.session_id, r.role]));
       const sessionIds = staffRows.map((r) => r.session_id);
 
-      const { data: sessions } = await supabase
-        .from('session_upcoming')
-        .select('session_id, session_date, session_time')
-        .in('session_id', sessionIds)
-        .in('session_status', ['Booked', 'Scheduled'])
-        .eq('session_booked', true)
-        .or(`session_date.gt.${todayBST},and(session_date.eq.${todayBST},session_time.gte.${nowTimeBST})`)
-        .order('session_date', { ascending: true })
-        .order('session_time', { ascending: true })
-        .limit(8);
+      const [{ data: liveSessions, error: liveErr }, { data: sessions, error: upcomingErr }] = await Promise.all([
+        supabase
+          .from('session_ongoing')
+          .select('session_id, started_at')
+          .in('session_id', sessionIds)
+          .order('started_at', { ascending: false, nullsFirst: false })
+          .limit(8),
+        supabase
+          .from('session_upcoming')
+          .select('session_id, session_date, session_time')
+          .in('session_id', sessionIds)
+          .in('session_status', ['Booked', 'Scheduled'])
+          .eq('session_booked', true)
+          .or(`session_date.gt.${todayBST},and(session_date.eq.${todayBST},session_time.gte.${nowTimeBST})`)
+          .order('session_date', { ascending: true })
+          .order('session_time', { ascending: true })
+          .limit(8),
+      ]);
+
+      if (liveErr) console.error('session_ongoing assignment lookup failed:', liveErr.message);
+      if (upcomingErr) console.error('session_upcoming assignment lookup failed:', upcomingErr.message);
+
+      const liveSessionIds = new Set((liveSessions ?? []).map((row) => row.session_id));
+      for (const row of liveSessions ?? []) {
+        const role = roleBySession.get(row.session_id) ?? '';
+        assignedSessions.push({ sessionId: row.session_id, label: `LIVE NOW — ${labelForStaffRole(role)}` });
+      }
 
       for (const row of sessions ?? []) {
+        if (liveSessionIds.has(row.session_id) || assignedSessions.length >= 8) continue;
         const role = roleBySession.get(row.session_id) ?? '';
-        const dt = new Date(`${row.session_date}T${row.session_time}`);
-        const label = `${dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'Europe/London' })}, ${dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' })} BST — ${labelForStaffRole(role)}`;
+        const dateLabel = new Date(`${row.session_date}T00:00:00Z`).toLocaleDateString('en-US', {
+          month: 'short', day: 'numeric', timeZone: 'UTC',
+        });
+        const label = `${dateLabel}, ${row.session_time.slice(0, 5)} ${timezoneMode} — ${labelForStaffRole(role)}`;
         assignedSessions.push({ sessionId: row.session_id, label });
       }
     }
@@ -82,6 +99,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // wraps EVERY page, and the pill needs to be correct on all of them, not just
   // wherever the dashboard's own query happens to run.
   let hasLiveSession = false;
+  let liveSessionLastChangeAt: number | null = null;
   if (myDisplayName) {
     const { data: staffForLive } = await supabase
       .from('session_staff')
@@ -91,10 +109,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     if (staffForLive && staffForLive.length > 0) {
       const { data: liveMatch } = await supabase
         .from('session_ongoing')
-        .select('session_id')
+        .select('session_id, last_updated, started_at')
         .in('session_id', staffForLive.map((r) => r.session_id))
+        .order('last_updated', { ascending: false, nullsFirst: false })
+        .limit(1)
         .maybeSingle();
       hasLiveSession = !!liveMatch;
+      const persistedChange = liveMatch?.last_updated ?? liveMatch?.started_at;
+      if (persistedChange) {
+        const timestamp = new Date(persistedChange).getTime();
+        if (Number.isFinite(timestamp)) liveSessionLastChangeAt = timestamp;
+      }
     }
   }
 
@@ -112,6 +137,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         viewingAs={user.viewingAs}
         unreadCount={unreadCount}
         hasLiveSession={hasLiveSession}
+        liveSessionLastChangeAt={liveSessionLastChangeAt}
       >
       {children}
     </AppShell>

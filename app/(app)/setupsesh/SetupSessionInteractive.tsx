@@ -1,7 +1,7 @@
 'use client';
 // FILE: app/(app)/setup/SetupSessionInteractive.tsx
 
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faPlay, faClock, faHourglassHalf, faIdBadge, faCrown, faUserTie, faUserGear, faUser,
@@ -15,6 +15,7 @@ import { parseTraineePaste, looksLikeSameDate, checkRequiredSessionFields, check
 import { lookupKnownTrainee, validateHostRank, resolveHostByDiscordId } from '../managesession/traineeActions';
 import { searchTraineeCandidates, type TraineeSuggestion } from '@/lib/profileSearch';
 import { confirmAndStartSession } from './actions';
+import type { SiteTimezoneMode } from '@/lib/siteTimezone';
 
 function statusClass(status: string) {
   return `detail-status--${status.toLowerCase()}`;
@@ -37,10 +38,12 @@ export default function SetupSessionInteractive({
   sessions,
   staff,
   initialSelectedId,
+  timezoneMode,
 }: {
   sessions: SessionRow[];
   staff: StaffOption[];
   initialSelectedId?: number;
+  timezoneMode: SiteTimezoneMode;
 }) {
   const [selectedId, setSelectedId] = useState<number | null>(
     initialSelectedId ?? sessions[0]?.session_id ?? null
@@ -78,7 +81,7 @@ export default function SetupSessionInteractive({
                     <span className={`sesh-card-status ${statusClass(s.session_status)}`}>{s.session_status}</span>
                   </div>
                   <div className="sesh-card-meta">
-                    <span><FontAwesomeIcon icon={faClock} /> {s.session_time.slice(0, 5)}</span>
+                    <span><FontAwesomeIcon icon={faClock} /> {s.session_time.slice(0, 5)} {timezoneMode}</span>
                     <span><FontAwesomeIcon icon={faCrown} /> {host ?? '—'}</span>
                     <span><FontAwesomeIcon icon={faGraduationCap} /> {filled}/{s.num_slots}</span>
                   </div>
@@ -96,19 +99,27 @@ export default function SetupSessionInteractive({
             <p>Select a session on the left to view its details.</p>
           </div>
         ) : (
-          <SessionDetail session={selected} onSetup={() => setModalOpen(true)} />
+          <SessionDetail session={selected} timezoneMode={timezoneMode} onSetup={() => setModalOpen(true)} />
         )}
       </div>
 
       {modalOpen && selected && (
-        <SetupModal session={selected} staff={staff} onClose={() => setModalOpen(false)} />
+        <SetupModal session={selected} staff={staff} timezoneMode={timezoneMode} onClose={() => setModalOpen(false)} />
       )}
     </div>
   );
 }
 
 // ── Detail panel — was setupsesh_detail_partial.php's renderDetailPanel ──
-function SessionDetail({ session: s, onSetup }: { session: SessionRow; onSetup: () => void }) {
+function SessionDetail({
+  session: s,
+  timezoneMode,
+  onSetup,
+}: {
+  session: SessionRow;
+  timezoneMode: SiteTimezoneMode;
+  onSetup: () => void;
+}) {
   const chips: { icon: typeof faCrown; label: string; name: string }[] = [];
   const host = findPrimaryStaff(s.staffRows, 'HOST');
   if (host) chips.push({ icon: faCrown, label: 'Host', name: host });
@@ -124,8 +135,10 @@ function SessionDetail({ session: s, onSetup }: { session: SessionRow; onSetup: 
     chips.push({ icon: faUser, label: extra.roleName, name: extra.name });
   }
 
-  const trainees = s.traineeRows.filter((t) => t.trainee_discord || t.trainee_roblox_username);
-  const filled = trainees.filter((t) => !t.is_standby).length;
+  const assignedTrainees = s.traineeRows.filter((t) => t.trainee_discord || t.trainee_roblox_username);
+  const trainees = assignedTrainees.filter((t) => !t.is_standby);
+  const reservedTrainees = assignedTrainees.filter((t) => t.is_standby);
+  const filled = trainees.length;
 
   return (
     <>
@@ -133,7 +146,7 @@ function SessionDetail({ session: s, onSetup }: { session: SessionRow; onSetup: 
         <div className={`detail-status ${statusClass(s.session_status)}`}>{s.session_status}</div>
         <h2 className="detail-name">{s.session_name || 'Unnamed Session'}</h2>
         <div className="detail-time-row">
-          <span><FontAwesomeIcon icon={faClock} /> {s.session_time.slice(0, 5)}</span>
+          <span><FontAwesomeIcon icon={faClock} /> {s.session_time.slice(0, 5)} {timezoneMode}</span>
           <span><FontAwesomeIcon icon={faHourglassHalf} /> {s.session_duration} min</span>
           <span><FontAwesomeIcon icon={faIdBadge} /> #{s.session_id}</span>
         </div>
@@ -150,7 +163,7 @@ function SessionDetail({ session: s, onSetup }: { session: SessionRow; onSetup: 
         </div>
         <div className="dstat">
           <div className="dstat-val">{s.session_time.slice(0, 5)}</div>
-          <div className="dstat-label">Start Time</div>
+          <div className="dstat-label">Start ({timezoneMode})</div>
         </div>
       </div>
 
@@ -194,6 +207,23 @@ function SessionDetail({ session: s, onSetup }: { session: SessionRow; onSetup: 
         </div>
       )}
 
+      {reservedTrainees.length > 0 && (
+        <div className="detail-section">
+          <div className="detail-section-label">Standby / Reserved ({reservedTrainees.length})</div>
+          <div className="trainee-chips">
+            {reservedTrainees.map((t) => (
+              <div className="trainee-chip trainee-chip--reserved" key={t.slot_number}>
+                <div className="trainee-chip-avatar"><FontAwesomeIcon icon={faHourglassHalf} /></div>
+                <div className="trainee-chip-info">
+                  <div className="trainee-chip-name">{t.trainee_roblox_username || t.trainee_discord}</div>
+                  {t.zone != null && <div className="trainee-chip-zone">Zone {t.zone}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="detail-actions">
         <button type="button" className="btn-setup" onClick={onSetup}>
           <FontAwesomeIcon icon={faPlay} /> Setup Session
@@ -205,14 +235,18 @@ function SessionDetail({ session: s, onSetup }: { session: SessionRow; onSetup: 
 
 // ── Setup modal ──────────────────────────────────────────────────────────
 function SetupModal({
-  session, staff, onClose,
+  session, staff, timezoneMode, onClose,
 }: {
   session: SessionRow;
   staff: StaffOption[];
+  timezoneMode: SiteTimezoneMode;
   onClose: () => void;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [trainerMode, setTrainerMode] = useState<'auto' | 'manual'>('auto');
+  const [reservedSlots, setReservedSlots] = useState(
+    () => session.traineeRows.filter((row) => row.is_standby).length
+  );
   const [additionalRows, setAdditionalRows] = useState(() =>
     additionalStaffFrom(session.staffRows).map((r, i) => ({ key: i, ...r }))
   );
@@ -231,7 +265,16 @@ function SetupModal({
     const pool = [hostRef.current?.value, ch1Ref.current?.value, ch2Ref.current?.value, ch3Ref.current?.value].filter(
       (v): v is string => !!v
     );
-    setAutoPreview(computeAutoDistribution(session.num_slots, pool));
+    setAutoPreview(computeAutoDistribution(session.num_slots + reservedSlots, pool));
+  }
+
+  function changeReservedSlots(delta: number) {
+    const nextCount = Math.max(0, Math.min(10, reservedSlots + delta));
+    setReservedSlots(nextCount);
+    const pool = [hostRef.current?.value, ch1Ref.current?.value, ch2Ref.current?.value, ch3Ref.current?.value].filter(
+      (value): value is string => !!value
+    );
+    setAutoPreview(computeAutoDistribution(session.num_slots + nextCount, pool));
   }
 
   function addAdditionalRow() {
@@ -248,14 +291,30 @@ function SetupModal({
   const ch4Match = findPrimaryStaff(session.staffRows, 'CH_4');
   const ast = (['AST_1', 'AST_2', 'AST_3', 'AST_4'] as const).map((r) => findPrimaryStaff(session.staffRows, r));
 
-  const slotArray = Array.from({ length: session.num_slots }, (_, i) => i + 1);
+  const standbyRows = session.traineeRows
+    .filter((row) => row.is_standby)
+    .sort((a, b) => a.slot_number - b.slot_number);
+  const traineeFieldRows = [
+    ...Array.from({ length: session.num_slots }, (_, i) => ({
+      fieldIndex: i + 1,
+      label: `Trainee ${i + 1}`,
+      isReserved: false,
+      defaultRow: session.traineeRows.find((row) => !row.is_standby && row.slot_number === i + 1),
+    })),
+    ...Array.from({ length: reservedSlots }, (_, i) => ({
+      fieldIndex: session.num_slots + i + 1,
+      label: `Standby / Reserved ${i + 1}`,
+      isReserved: true,
+      defaultRow: standbyRows[i],
+    })),
+  ];
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div>
-            <div className="modal-eyebrow">#{session.session_id} · {session.session_time.slice(0, 5)}</div>
+            <div className="modal-eyebrow">#{session.session_id} · {session.session_time.slice(0, 5)} {timezoneMode}</div>
             <div className="modal-title">{session.session_name || 'Setup Session'}</div>
           </div>
           <button type="button" className="modal-close" onClick={onClose}><FontAwesomeIcon icon={faXmark} /></button>
@@ -264,7 +323,7 @@ function SetupModal({
         <div className="modal-body">
           <div className="modal-info-banner">
             <span className="mib-icon"><FontAwesomeIcon icon={faIdBadge} /></span>
-            <span>Confirm staff and trainees below, then start the session — it'll move to the live Active Session view.</span>
+            <span>Confirm staff and trainees below, then start the session — it&apos;ll move to the live Active Session view.</span>
           </div>
 
           <form
@@ -274,6 +333,7 @@ function SetupModal({
           >
             <input type="hidden" name="session_id" value={session.session_id} />
             <input type="hidden" name="num_slots" value={session.num_slots} />
+            <input type="hidden" name="reserved_slots" value={reservedSlots} />
             <input type="hidden" name="trainer_assignment_mode" value={trainerMode} />
 
             <div className="modal-section-label">Staff Assignment</div>
@@ -320,7 +380,7 @@ function SetupModal({
             </div>
 
             <div className="staff-field" style={{ marginTop: 10 }}>
-              <label className="staff-label">Additional Staff</label>
+              <label className="staff-label">Additional Staff (first standalone IH fills Co-Host 4 / SV)</label>
               {additionalRows.map((row) => (
                 <div className="additional-staff-row" key={row.key}>
                   <input type="text" name="additional_staff_name" defaultValue={row.name} placeholder="Staff name" list="setup-staff-names" />
@@ -344,12 +404,13 @@ function SetupModal({
               </div>
             </div>
 
-            {slotArray.map((n) => {
-              const t = session.traineeRows.find((tr) => tr.slot_number === n);
+            {traineeFieldRows.map(({ fieldIndex: n, label, isReserved, defaultRow: t }) => {
               return (
                 <TraineeRow
                   key={n}
                   n={n}
+                  label={label}
+                  isReserved={isReserved}
                   defaultRow={t}
                   trainerMode={trainerMode}
                   autoTrainer={autoPreview[n - 1] ?? ''}
@@ -358,6 +419,26 @@ function SetupModal({
                 />
               );
             })}
+
+            <div className="reserved-slot-actions">
+              <button
+                type="button"
+                className="btn-add-row"
+                disabled={reservedSlots >= 10}
+                onClick={() => changeReservedSlots(1)}
+              >
+                + Add standby/reserved slot
+              </button>
+              {reservedSlots > 0 && (
+                <button
+                  type="button"
+                  className="btn-add-row"
+                  onClick={() => changeReservedSlots(-1)}
+                >
+                  Remove last reserved slot
+                </button>
+              )}
+            </div>
 
             <div className="modal-footer">
               <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
@@ -374,9 +455,11 @@ function SetupModal({
 
 // ── One trainee row, with quick-fill (search known trainees, or paste) ──
 function TraineeRow({
-  n, defaultRow, trainerMode, autoTrainer, sessionDateISO, sessionHost,
+  n, label, isReserved, defaultRow, trainerMode, autoTrainer, sessionDateISO, sessionHost,
 }: {
   n: number;
+  label: string;
+  isReserved: boolean;
   defaultRow?: SessionRow['traineeRows'][number];
   trainerMode: 'auto' | 'manual';
   autoTrainer: string;
@@ -493,12 +576,10 @@ function TraineeRow({
 
   return (
     <div className="trainee-slot">
+      {isReserved && <input type="hidden" name={`trainee_${n}_standby`} value="on" />}
       <div className="trainee-slot-header">
-        <span className="trainee-slot-label">Trainee {n}</span>
+        <span className="trainee-slot-label">{label}</span>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '.72rem', color: 'rgba(255,255,255,.5)' }}>
-            <input type="checkbox" name={`trainee_${n}_standby`} defaultChecked={defaultRow?.is_standby ?? false} /> Standby
-          </label>
           <button type="button" className="btn-paste" onClick={() => setQuickFillOpen((o) => !o)}>
             <FontAwesomeIcon icon={faMagnifyingGlass} /> Quick-fill
           </button>

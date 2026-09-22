@@ -1,5 +1,6 @@
 // types/session.ts
-// Mirrors session_ongoing (+ related) columns from db.txt, plus the shape of live_state jsonb.
+// session_ongoing core columns plus UI-only fields hydrated from the normalized
+// session_staff/session_trainees tables in database/current_db.sql.
 
 export interface SessionOngoingRow {
   session_id: number;
@@ -9,21 +10,21 @@ export interface SessionOngoingRow {
   session_duration: string;
   num_slots: number;
   trainer_assignment_mode: 'auto' | 'manual';
+  // UI-only assignment fields. They are not physical session_ongoing columns.
   host: string;
   co_host1: string | null;
   co_host2: string | null;
   co_host3: string | null;
-  'co_host4/supervisor': string | null;
+  co_host4_supervisor: string | null;
   assistant_1: string | null;
   assistant_2: string | null;
   assistant_3: string | null;
   assistant_4: string | null;
-  additional_staff: string | null;
-  staff_attendance: string;
   session_date: string;
   session_time: string;
   started_at: string | null;
   trainee_timer: number;
+  // UI-only compact attendance snapshot hydrated from session_trainees.
   trainee_attendance: string;
   additional_notes: string | null;
   live_state: LiveState | null;
@@ -45,12 +46,14 @@ export interface TimerState {
 }
 
 export interface DriverRow {
+  sourceRowId?: number;
   discord: string;
   roblox: string;
   attended: boolean;
 }
 
 export interface StaffShiftRow {
+  sourceRowId?: number;
   role: 'Main AST' | 'Assistant' | 'Co-Host' | 'Internal Helper';
   discord: string;
   notes: string;
@@ -86,6 +89,16 @@ export interface TimeTracker {
   screenieTime?: number;
 }
 
+export interface LiveTraineeRow {
+  discord: string;
+  discordId: string;
+  roblox: string;
+  zone: string;
+  notes: string;
+  trainerName: string;
+  attended: boolean;
+}
+
 export interface AnnouncementPayload {
   id: string;
   message: string;
@@ -102,10 +115,13 @@ export interface OverridesState {
   'staff-delete': boolean;
   'trainee-details': boolean;
   'trainer-details': boolean;
+  'staff-addition': boolean;
   'allow-all': boolean;
 }
 
 export interface LiveState {
+  sessionHost?: string | null;
+  trainees?: Record<string, LiveTraineeRow>;
   timers?: Record<string, TimerState>;
   drivers?: DriverRow[];
   staffShift?: StaffShiftRow[];

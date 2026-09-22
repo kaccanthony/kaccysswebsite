@@ -1,20 +1,27 @@
 // FILE: app/(app)/managesession/ManageSessionInteractive.tsx
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faPen, faTrash, faTimes, faCrown, faPlus, faEnvelopeOpenText,
   faMagnifyingGlass, faXmark, faClipboard,
 } from '@fortawesome/free-solid-svg-icons';
-import { saveSession, deleteSession } from './actions';
+import { saveSession, deleteSession, updateSiteTimezone } from './actions';
 import QuickAddTrainee from './QuickAddTrainee';
 import GlobalQuickFillTrainee from './GlobalQuickFillTrainee';
 import { parseTraineePaste, looksLikeSameDate, checkRequiredSessionFields, checkIdentityFields, checkIdentityFieldFormats } from './parseTraineePaste';
 import { lookupKnownTrainee, searchKnownTrainees, validateHostRank, resolveHostByDiscordId, type KnownTraineeMatch } from './traineeActions';
 import { useModalVisibility } from '@/lib/useModalVisibility';
+import type { SiteTimezoneMode } from '@/lib/siteTimezone';
 
 const DRAFT_KEY = 'managesession_draft';
+const SESSION_VIRTUALIZATION_THRESHOLD = 50;
+const SESSION_VIRTUAL_OVERSCAN = 8;
+const ESTIMATED_SESSION_ROW_HEIGHT = 68;
+const estimateSessionRowHeight = () => ESTIMATED_SESSION_ROW_HEIGHT;
+const PRIMARY_ROLE_CODES = ['HOST', 'CH_1', 'CH_2', 'CH_3', 'CH_4', 'AST_1', 'AST_2', 'AST_3', 'AST_4'];
 
 export interface StaffOption {
   name: string;
@@ -194,23 +201,201 @@ function statusBadgeClass(status: string) {
   return map[status] ?? 'badge-scheduled';
 }
 
+const SessionTableRow = memo(function SessionTableRow({
+  session,
+  canManage,
+  canDelete,
+  onEdit,
+  onDelete,
+  timezoneMode,
+  virtualIndex,
+  measureElement,
+}: {
+  session: SessionRow;
+  canManage: boolean;
+  canDelete: boolean;
+  onEdit: (session: SessionRow) => void;
+  onDelete: (session: SessionRow) => void;
+  timezoneMode: SiteTimezoneMode;
+  virtualIndex?: number;
+  measureElement?: (node: HTMLTableRowElement | null) => void;
+}) {
+  const handleEdit = useCallback(() => onEdit(session), [onEdit, session]);
+  const handleDelete = useCallback(() => onDelete(session), [onDelete, session]);
+  const filled = useMemo(
+    () => session.traineeRows.reduce((count, trainee) => count + (trainee.is_standby ? 0 : 1), 0),
+    [session.traineeRows]
+  );
+  const dateLabel = useMemo(
+    () => new Date(`${session.session_date}T00:00:00`).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }),
+    [session.session_date]
+  );
+  const timeLabel = `${session.session_time.slice(0, 5)} ${timezoneMode}`;
+  const virtual = virtualIndex !== undefined;
+
+  return (
+    <tr
+      ref={virtual ? measureElement : undefined}
+      data-index={virtualIndex}
+      className={virtual ? 'session-virtual-row' : undefined}
+    >
+      <td className="td-id">#{session.session_id}</td>
+      <td className="td-name">
+        <div className="td-name-inner">
+          <span className="session-name">{session.session_name || '—'}</span>
+          {session.session_desc && <span className="session-desc">{session.session_desc.slice(0, 55)}</span>}
+        </div>
+      </td>
+      <td><span className={`badge ${statusBadgeClass(session.session_status)}`}>{session.session_status}</span></td>
+      <td className="td-host">
+        <div className="td-host-inner">
+          <FontAwesomeIcon icon={faCrown} className="td-host-icon" /> {getHostName(session)}
+        </div>
+      </td>
+      <td className="td-date">
+        <span className="date-main">{dateLabel}</span>
+        <span className="date-time">{timeLabel}</span>
+      </td>
+      <td><span className={`slots-pill ${filled >= session.num_slots ? 'slots-full' : ''}`}>{filled}/{session.num_slots}</span></td>
+      <td className="td-dur">{session.session_duration} min</td>
+      {canManage && (
+        <td className="td-actions">
+          <div className="td-actions-inner">
+            <QuickAddTrainee sessionId={session.session_id} />
+            <button className="action-btn" title="Edit" onClick={handleEdit}>
+              <FontAwesomeIcon icon={faPen} />
+            </button>
+            {canDelete && (
+              <button className="action-btn danger" title="Delete" onClick={handleDelete}>
+                <FontAwesomeIcon icon={faTrash} />
+              </button>
+            )}
+          </div>
+        </td>
+      )}
+    </tr>
+  );
+});
+
+function SessionTable({
+  sessions,
+  canManage,
+  canDelete,
+  onEdit,
+  onDelete,
+  timezoneMode,
+}: {
+  sessions: SessionRow[];
+  canManage: boolean;
+  canDelete: boolean;
+  onEdit: (session: SessionRow) => void;
+  onDelete: (session: SessionRow) => void;
+  timezoneMode: SiteTimezoneMode;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualized = sessions.length > SESSION_VIRTUALIZATION_THRESHOLD;
+  const getItemKey = useCallback((index: number) => sessions[index]?.session_id ?? index, [sessions]);
+  const virtualizer = useVirtualizer<HTMLDivElement, HTMLTableRowElement>({
+    count: virtualized ? sessions.length : 0,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: estimateSessionRowHeight,
+    getItemKey,
+    overscan: SESSION_VIRTUAL_OVERSCAN,
+  });
+  const virtualRows = virtualized ? virtualizer.getVirtualItems() : [];
+  const firstVirtualRow = virtualRows[0];
+  const lastVirtualRow = virtualRows[virtualRows.length - 1];
+  const topSpacerHeight = firstVirtualRow?.start ?? 0;
+  const bottomSpacerHeight = lastVirtualRow
+    ? Math.max(0, virtualizer.getTotalSize() - lastVirtualRow.end)
+    : 0;
+  const columnCount = canManage ? 8 : 7;
+
+  return (
+    <div ref={scrollRef} className={`table-wrap ${virtualized ? 'is-virtualized' : ''}`}>
+      <table className="session-table">
+        <thead>
+          <tr>
+            <th>ID</th><th>Session</th><th>Status</th><th>Host</th>
+            <th>Date &amp; Time</th><th>Slots</th><th>Duration</th>
+            {canManage && <th>Actions</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {virtualized ? (
+            <>
+              {topSpacerHeight > 0 && (
+                <tr className="session-virtual-spacer" aria-hidden="true">
+                  <td colSpan={columnCount} style={{ height: topSpacerHeight }} />
+                </tr>
+              )}
+              {virtualRows.map((virtualRow) => {
+                const session = sessions[virtualRow.index];
+                return (
+                  <SessionTableRow
+                    key={session.session_id}
+                    session={session}
+                    canManage={canManage}
+                    canDelete={canDelete}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                    timezoneMode={timezoneMode}
+                    virtualIndex={virtualRow.index}
+                    measureElement={virtualizer.measureElement}
+                  />
+                );
+              })}
+              {bottomSpacerHeight > 0 && (
+                <tr className="session-virtual-spacer" aria-hidden="true">
+                  <td colSpan={columnCount} style={{ height: bottomSpacerHeight }} />
+                </tr>
+              )}
+            </>
+          ) : (
+            sessions.map((session) => (
+              <SessionTableRow
+                key={session.session_id}
+                session={session}
+                canManage={canManage}
+                canDelete={canDelete}
+                onEdit={onEdit}
+                onDelete={onDelete}
+                timezoneMode={timezoneMode}
+              />
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function ManageSessionInteractive({
   sessions,
   staff,
   rawRole,
   permLevel,
+  timezoneMode,
+  canManageTimezone,
   success,
 }: {
   sessions: SessionRow[];
   staff: StaffOption[];
   rawRole: string;
   permLevel: number;
+  timezoneMode: SiteTimezoneMode;
+  canManageTimezone: boolean;
   success?: string;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const { shouldRender, visible } = useModalVisibility(modalOpen);
   const [editing, setEditing] = useState<SessionRow | null>(null);
   const [numSlots, setNumSlots] = useState(4);
+  const [reservedSlots, setReservedSlots] = useState(0);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
   const [statusValue, setStatusValue] = useState('Requested');
   const [bookedValue, setBookedValue] = useState(false);
@@ -277,12 +462,14 @@ export default function ManageSessionInteractive({
     setBookedValue(false);
     setAdditionalStaffRows([]);
     setHasInternal(false);
+    setReservedSlots(0);
 
     const raw = typeof window !== 'undefined' ? localStorage.getItem(DRAFT_KEY) : null;
     if (raw) {
       try {
         const data = JSON.parse(raw) as Record<string, string>;
         setNumSlots(Math.max(4, Math.min(10, parseInt(data.num_slots, 10) || 4)));
+        setReservedSlots(Math.max(0, Math.min(10, parseInt(data.reserved_slots, 10) || 0)));
         if (data.session_status) setStatusValue(data.session_status);
         setBookedValue(data.session_booked === 'on');
         setTimeDigits((data.session_time ?? '').replace(/\D/g, '').slice(0, 4));
@@ -296,21 +483,22 @@ export default function ManageSessionInteractive({
         pendingDraftFillRef.current = data; // rest gets filled once the right number of trainee rows exist
       } catch {
         setNumSlots(4);
+        setReservedSlots(0);
         setTimeDigits('');
       }
     } else {
       setNumSlots(4);
+      setReservedSlots(0);
       setTimeDigits('');
     }
 
     setModalOpen(true);
   }
 
-  const PRIMARY_ROLE_CODES = ['HOST', 'CH_1', 'CH_2', 'CH_3', 'CH_4', 'AST_1', 'AST_2', 'AST_3', 'AST_4'];
-
-  function openEdit(s: SessionRow) {
+  const openEdit = useCallback((s: SessionRow) => {
     setEditing(s);
     setNumSlots(s.num_slots);
+    setReservedSlots(s.traineeRows.filter((row) => row.is_standby).length);
     setStatusValue(s.session_status);
     setBookedValue(s.session_booked);
     setTimeDigits(s.session_time.replace(/\D/g, '').slice(0, 4));
@@ -325,7 +513,11 @@ export default function ManageSessionInteractive({
     setHasInternal(hasIH(s.staffRows, 'CH_3') || hasIH(s.staffRows, 'CH_4'));
 
     setModalOpen(true);
-  }
+  }, []);
+
+  const requestDelete = useCallback((session: SessionRow) => {
+    setDeleteTarget({ id: session.session_id, name: session.session_name || 'this session' });
+  }, []);
 
   function handleTimeChange(e: React.ChangeEvent<HTMLInputElement>) {
     setTimeDigits(e.target.value.replace(/\D/g, '').slice(0, 4));
@@ -488,7 +680,7 @@ export default function ManageSessionInteractive({
       // React state now — setting them here would be immediately
       // overwritten by React's own render, they're handled in openAdd instead.
       if (
-        key === 'session_status' || key === 'session_booked' || key === 'session_time' || key === 'num_slots' || key === 'action' ||
+        key === 'session_status' || key === 'session_booked' || key === 'session_time' || key === 'num_slots' || key === 'reserved_slots' || key === 'action' ||
         key === 'additional_staff_name' || key === 'additional_staff_role' || key === '__additionalStaffRows'
       ) continue;
       const el = form.elements.namedItem(key);
@@ -497,7 +689,7 @@ export default function ManageSessionInteractive({
       }
     }
     pendingDraftFillRef.current = null;
-  }, [modalOpen, editing, numSlots]);
+  }, [modalOpen, editing, numSlots, reservedSlots]);
 
   // Autosave every change to localStorage — Add mode only. Editing an
   // existing session already has safe data sitting in the DB.
@@ -524,7 +716,23 @@ export default function ManageSessionInteractive({
     }
   }, [success]);
 
-  const slotArray = Array.from({ length: numSlots }, (_, i) => i + 1);
+  const standbyRows = editing?.traineeRows
+    .filter((row) => row.is_standby)
+    .sort((a, b) => a.slot_number - b.slot_number) ?? [];
+  const traineeFieldRows = [
+    ...Array.from({ length: numSlots }, (_, i) => ({
+      fieldIndex: i + 1,
+      label: `Trainee ${i + 1}`,
+      isReserved: false,
+      defaultRow: editing?.traineeRows.find((row) => !row.is_standby && row.slot_number === i + 1),
+    })),
+    ...Array.from({ length: reservedSlots }, (_, i) => ({
+      fieldIndex: numSlots + i + 1,
+      label: `Standby / Reserved ${i + 1}`,
+      isReserved: true,
+      defaultRow: standbyRows[i],
+    })),
+  ];
 
   return (
     <>
@@ -547,6 +755,36 @@ export default function ManageSessionInteractive({
           </div>
         )}
       </div>
+
+      {canManageTimezone && (
+        <form
+          action={updateSiteTimezone}
+          className="timezone-control"
+          onSubmit={(event) => {
+            const nextMode = timezoneMode === 'BST' ? 'GMT' : 'BST';
+            if (!window.confirm(
+              `Change site timezone from ${timezoneMode} to ${nextMode}? Existing session and event clock values stay unchanged, but their UTC interpretation shifts by one hour.`
+            )) event.preventDefault();
+          }}
+        >
+          <div>
+            <strong>Session and event timezone</strong>
+            <span>Supabase remains UTC. Site wall-clock mode: {timezoneMode}.</span>
+          </div>
+          <input type="hidden" name="timezone_mode" value={timezoneMode === 'BST' ? 'GMT' : 'BST'} />
+          <button
+            type="submit"
+            className={`timezone-toggle ${timezoneMode.toLowerCase()}`}
+            role="switch"
+            aria-checked={timezoneMode === 'BST'}
+            aria-label={`Change site timezone to ${timezoneMode === 'BST' ? 'GMT' : 'BST'}`}
+          >
+            <span>GMT</span>
+            <i aria-hidden="true" />
+            <span>BST</span>
+          </button>
+        </form>
+      )}
 
       <div className="filter-bar">
         <div className="search-wrap">
@@ -602,72 +840,20 @@ export default function ManageSessionInteractive({
         )}
       </div>
 
-      <div className="table-wrap">
-        {filteredSessions.length === 0 ? (
+      {filteredSessions.length === 0 ? (
+        <div className="table-wrap">
           <div className="empty-state"><p>{hasActiveFilter ? 'No sessions match your filters.' : 'No sessions found.'}</p></div>
-        ) : (
-          <table className="session-table">
-            <thead>
-              <tr>
-                <th>ID</th><th>Session</th><th>Status</th><th>Host</th>
-                <th>Date &amp; Time</th><th>Slots</th><th>Duration</th>
-                {permLevel >= 10 && <th>Actions</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {filteredSessions.map((s) => {
-                const filled = s.traineeRows.filter((t) => !t.is_standby).length;
-                return (
-                  <tr key={s.session_id}>
-                    <td className="td-id">#{s.session_id}</td>
-                    <td className="td-name">
-                      <div className="td-name-inner">
-                        <span className="session-name">{s.session_name || '—'}</span>
-                        {s.session_desc && <span className="session-desc">{s.session_desc.slice(0, 55)}</span>}
-                      </div>
-                    </td>
-                    <td><span className={`badge ${statusBadgeClass(s.session_status)}`}>{s.session_status}</span></td>
-                    <td className="td-host">
-                      <div className="td-host-inner">
-                        <FontAwesomeIcon icon={faCrown} className="td-host-icon" /> {getHostName(s)}
-                      </div>
-                    </td>
-                    <td className="td-date">
-                      <span className="date-main">
-                        {new Date(`${s.session_date}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </span>
-                      <span className="date-time">
-                        {new Date(`${s.session_date}T${s.session_time}`).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                      </span>
-                    </td>
-                    <td><span className={`slots-pill ${filled >= s.num_slots ? 'slots-full' : ''}`}>{filled}/{s.num_slots}</span></td>
-                    <td className="td-dur">{s.session_duration} min</td>
-                    {permLevel >= 10 && (
-                      <td className="td-actions">
-                        <div className="td-actions-inner">
-                          <QuickAddTrainee sessionId={s.session_id} />
-                          <button className="action-btn" title="Edit" onClick={() => openEdit(s)}>
-                            <FontAwesomeIcon icon={faPen} />
-                          </button>
-                          {permLevel >= 15 && (
-                            <button
-                              className="action-btn danger"
-                              title="Delete"
-                              onClick={() => setDeleteTarget({ id: s.session_id, name: s.session_name || 'this session' })}
-                            >
-                              <FontAwesomeIcon icon={faTrash} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
+        </div>
+      ) : (
+        <SessionTable
+          sessions={filteredSessions}
+          canManage={permLevel >= 10}
+          canDelete={permLevel >= 15}
+          onEdit={openEdit}
+          onDelete={requestDelete}
+          timezoneMode={timezoneMode}
+        />
+      )}
 
       {/* ══ ADD / EDIT MODAL ══ */}
       {shouldRender && (
@@ -680,6 +866,7 @@ export default function ManageSessionInteractive({
 
               <form ref={formRef} action={saveSession} onChange={handleFormChange} className="modal-form">
                 <input type="hidden" name="action" value={editing ? 'edit' : 'add'} />
+                <input type="hidden" name="reserved_slots" value={reservedSlots} />
                 {editing && <input type="hidden" name="session_id" value={editing.session_id} />}
 
                 {!editing && (
@@ -738,7 +925,7 @@ export default function ManageSessionInteractive({
                     <input type="date" name="session_date" required defaultValue={editing?.session_date ?? ''} />
                   </div>
                   <div className="form-group">
-                    <label>TIME* (BST)</label>
+                    <label>TIME* ({timezoneMode})</label>
                     <input
                       type="text"
                       name="session_time"
@@ -804,8 +991,8 @@ export default function ManageSessionInteractive({
 
                 {hasInternal && (
                   <p className="internal-hint">
-                    You can also add an Internal Helper who isn&apos;t otherwise assigned — type their name and role as
-                    <strong> &quot;IH&quot;</strong> (or e.g. &quot;IH, Observer&quot;) in Additional Staff below.
+                    Add standalone Internal Helpers below using <strong>&quot;IH&quot;</strong> or
+                    <strong> &quot;Internal Helper&quot;</strong>. The first fills Co-Host 4 / SV; any others remain Additional Staff.
                   </p>
                 )}
 
@@ -859,18 +1046,14 @@ export default function ManageSessionInteractive({
 
                 <div className="form-divider"><span>Trainee Assignment</span></div>
 
-                {slotArray.map((n) => {
-                  const t = editing?.traineeRows.find((row) => row.slot_number === n);
+                {traineeFieldRows.map(({ fieldIndex: n, label, isReserved, defaultRow: t }) => {
                   const panelOpen = quickFillSlot === n;
                   return (
                     <div className="trainee-slot" key={n}>
+                      {isReserved && <input type="hidden" name={`trainee_${n}_standby`} value="on" />}
                       <div className="trainee-slot-header">
-                        <div className="trainee-slot-label">Trainee {n}</div>
+                        <div className="trainee-slot-label">{label}</div>
                         <div className="trainee-slot-header-right">
-                          <label className="standby-check">
-                            <input type="checkbox" name={`trainee_${n}_standby`} defaultChecked={t?.is_standby ?? false} />
-                            Standby / Reserved
-                          </label>
                           <button
                             type="button"
                             className={`btn-paste${panelOpen ? ' active' : ''}`}
@@ -968,6 +1151,26 @@ export default function ManageSessionInteractive({
                     </div>
                   );
                 })}
+
+                <div className="reserved-slot-actions">
+                  <button
+                    type="button"
+                    className="btn-ghost btn-add-row"
+                    disabled={reservedSlots >= 10}
+                    onClick={() => setReservedSlots((count) => Math.min(10, count + 1))}
+                  >
+                    <FontAwesomeIcon icon={faPlus} /> Add standby/reserved slot
+                  </button>
+                  {reservedSlots > 0 && (
+                    <button
+                      type="button"
+                      className="btn-ghost btn-add-row"
+                      onClick={() => setReservedSlots((count) => Math.max(0, count - 1))}
+                    >
+                      Remove last reserved slot
+                    </button>
+                  )}
+                </div>
 
                 <div className="modal-footer">
                   <button type="button" className="btn-ghost" onClick={() => setModalOpen(false)}>Cancel</button>

@@ -27,6 +27,7 @@ import {
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 import type { UpcomingSession } from '@/lib/upcomingSessions';
 import { formatSessionTimes, type RelativeTime } from '@/lib/formatSessionTimes';
+import { formatInstantInSiteTimezone } from '@/lib/siteTimezone';
 import './upcoming.css';
 
 type ViewMode = 'grid' | 'focus' | 'list' | 'card';
@@ -126,10 +127,9 @@ function DetailModal({
 
   if (!session) return null;
 
-  const t = formatSessionTimes(session.session_datetime_iso);
+  const t = formatSessionTimes(session.session_datetime_iso, session.timezone_mode);
   const startOnly = session.session_datetime_iso
-    ? new Date(session.session_datetime_iso).toLocaleString('en-GB', {
-        timeZone: 'Europe/London',
+    ? formatInstantInSiteTimezone(new Date(session.session_datetime_iso), session.timezone_mode, {
         hour: '2-digit',
         minute: '2-digit',
         hour12: false,
@@ -183,7 +183,7 @@ function DetailModal({
             </div>
             <div className="dstat">
               <div className="dstat-val">{startOnly}</div>
-              <div className="dstat-label">Start (BST)</div>
+              <div className="dstat-label">Start ({session.timezone_mode})</div>
             </div>
           </div>
 
@@ -222,6 +222,28 @@ function DetailModal({
                   <div className="trainee-chip" key={i}>
                     <div className="trainee-chip-avatar">
                       <FontAwesomeIcon icon={faGraduationCap} />
+                    </div>
+                    <div className="trainee-chip-info">
+                      <div className="trainee-chip-name">{tr.discord || '—'}</div>
+                      {tr.zone && <div className="trainee-chip-zone">Zone {tr.zone}</div>}
+                      {tr.trainer && <div className="trainee-chip-zone">Trainer: {tr.trainer}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {session.reserved_trainees.length > 0 && (
+            <div className="detail-section">
+              <div className="detail-section-label">
+                Standby / Reserved ({session.reserved_trainees.length})
+              </div>
+              <div className="chips">
+                {session.reserved_trainees.map((tr, i) => (
+                  <div className="trainee-chip trainee-chip--reserved" key={`${tr.discord}-${i}`}>
+                    <div className="trainee-chip-avatar">
+                      <FontAwesomeIcon icon={faHourglassHalf} />
                     </div>
                     <div className="trainee-chip-info">
                       <div className="trainee-chip-name">{tr.discord || '—'}</div>
@@ -272,7 +294,7 @@ export default function UpcomingSessionsClient({ sessions }: { sessions: Upcomin
           <div className="section-eyebrow">Session Management</div>
           <h1 className="section-title">Upcoming Sessions</h1>
           <p className="page-sub">
-            Every scheduled session from right now onward <span className="bst-badge">BST</span>
+            Every scheduled session from right now onward <span className="bst-badge">{sessions[0]?.timezone_mode ?? 'BST'}</span>
           </p>
         </div>
         <div className="view-switcher">
@@ -297,7 +319,7 @@ export default function UpcomingSessionsClient({ sessions }: { sessions: Upcomin
         ) : view === 'grid' ? (
           <div className="grid-view">
             {sessions.map((s) => {
-              const t = formatSessionTimes(s.session_datetime_iso);
+              const t = formatSessionTimes(s.session_datetime_iso, s.timezone_mode);
               return (
                 <div className="sesh-tile" key={s.session_id}>
                   <div className="sesh-tile-top">
@@ -322,7 +344,7 @@ export default function UpcomingSessionsClient({ sessions }: { sessions: Upcomin
         ) : view === 'card' ? (
           <div className="card-view">
             {sessions.map((s) => {
-              const t = formatSessionTimes(s.session_datetime_iso);
+              const t = formatSessionTimes(s.session_datetime_iso, s.timezone_mode);
               return (
                 <div className="sesh-fullcard" key={s.session_id}>
                   <div className="sesh-tile-top">
@@ -347,7 +369,7 @@ export default function UpcomingSessionsClient({ sessions }: { sessions: Upcomin
         ) : view === 'list' ? (
           <div className="list-view">
             {sessions.map((s) => {
-              const t = formatSessionTimes(s.session_datetime_iso);
+              const t = formatSessionTimes(s.session_datetime_iso, s.timezone_mode);
               return (
                 <div className="sesh-row" key={s.session_id}>
                   <div className="sesh-row-time">
@@ -372,12 +394,12 @@ export default function UpcomingSessionsClient({ sessions }: { sessions: Upcomin
           // focus view
           (() => {
             const focusSession = sessions.find((s) => s.session_id === focusId) ?? sessions[0];
-            const ft = formatSessionTimes(focusSession?.session_datetime_iso ?? null);
+            const ft = formatSessionTimes(focusSession?.session_datetime_iso ?? null, focusSession?.timezone_mode ?? 'BST');
             return (
               <div className="focus-layout">
                 <div className="focus-list">
                   {sessions.map((s) => {
-                    const t = formatSessionTimes(s.session_datetime_iso);
+                    const t = formatSessionTimes(s.session_datetime_iso, s.timezone_mode);
                     const active = s.session_id === (focusId ?? sessions[0]?.session_id);
                     return (
                       <div

@@ -14,19 +14,22 @@ import { useLiveSession } from '../LiveSessionContext';
 export default function PublicRowsTable({
   sessionId,
   initialRows,
+  initialLastChangeAt,
 }: {
   sessionId: number;
   initialRows: PublicSessionRow[];
+  initialLastChangeAt: number | null;
 }) {
   const [rows, setRows] = useState<PublicSessionRow[]>(initialRows);
   const { reportActive } = useLiveSession();
   const lastSnapshot = useRef(JSON.stringify(initialRows));
+  const lastDatabaseChange = useRef(initialLastChangeAt);
 
   useEffect(() => {
     if (!sessionId) return;
 
     // the server just gave us fresh data for this render — that counts as a change
-    reportActive(true);
+    reportActive(false, initialLastChangeAt ?? undefined);
 
     async function refresh() {
       try {
@@ -34,11 +37,15 @@ export default function PublicRowsTable({
         const data = await res.json();
         const newRows: PublicSessionRow[] = data.rows ?? [];
         const snapshot = JSON.stringify(newRows);
-        const changed = snapshot !== lastSnapshot.current;
+        const databaseChange = typeof data.lastChangeAt === 'number' ? data.lastChangeAt : null;
+        const changed = databaseChange !== null
+          ? databaseChange !== lastDatabaseChange.current
+          : snapshot !== lastSnapshot.current;
         lastSnapshot.current = snapshot;
+        lastDatabaseChange.current = databaseChange;
 
         setRows(newRows);
-        reportActive(changed); // only bumps "last change" when the data actually differs
+        reportActive(changed, databaseChange ?? undefined);
       } catch {
         // silent — just retry next poll (same as the PHP version).
         // Note: we deliberately do NOT call reportActive() here, since a
@@ -53,9 +60,10 @@ export default function PublicRowsTable({
   }, [sessionId]);
 
   return (
-    <tbody id="public-rows">
-      {rows.map((r) => (
-        <tr key={r.slot}>
+    <>
+      <tbody id="public-rows">
+      {rows.filter((row) => row.group === 'allocated').map((r) => (
+        <tr key={r.key}>
           <td>{r.slot}</td>
           <td>{r.discord}</td>
           <td>{r.roblox}</td>
@@ -70,6 +78,25 @@ export default function PublicRowsTable({
           </td>
         </tr>
       ))}
-    </tbody>
+      </tbody>
+      <tbody className="reserved-rows">
+        <tr className="row-group-title"><th colSpan={6}>Standby / Reserved</th></tr>
+        {rows.filter((row) => row.group === 'reserved').map((r) => (
+          <tr key={r.key}>
+            <td>{r.slot}</td>
+            <td>{r.discord || '-'}</td>
+            <td>{r.roblox || '-'}</td>
+            <td>{r.zone ?? '-'}</td>
+            <td>{r.trainer || '-'}</td>
+            <td className="chk-cell">
+              {r.done ? <FontAwesomeIcon icon={faCheckCircle} className="done" /> : <FontAwesomeIcon icon={faCircle} />}
+            </td>
+          </tr>
+        ))}
+        {rows.every((row) => row.group !== 'reserved') && (
+          <tr><td colSpan={6} className="reserved-empty">No standby, reserved, or unallocated trainees.</td></tr>
+        )}
+      </tbody>
+    </>
   );
 }

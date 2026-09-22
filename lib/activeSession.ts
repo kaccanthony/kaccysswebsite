@@ -1,8 +1,11 @@
 // FILE: lib/activeSession.ts
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { LiveState } from '@/types/session';
 
 export interface PublicSessionRow {
-  slot: number;
+  key: string;
+  slot: number | 'Standby' | 'Unallocated';
+  group: 'allocated' | 'reserved';
   discord: string;
   roblox: string;
   zone: string | null;
@@ -10,55 +13,108 @@ export interface PublicSessionRow {
   done: boolean;
 }
 
-// Loosely typed — session_ongoing has trainee_{1..10}_* dynamic columns
+interface SessionTrainee {
+  slot_number: number;
+  is_standby: boolean;
+  trainee_discord: string | null;
+  trainee_roblox_username: string | null;
+  zone: number | null;
+  trainer_name: string | null;
+}
+
 export interface SessionOngoing {
   session_id: number;
   host: string;
-  started_at: string;
-  live_state: string | null;
+  started_at: string | null;
+  live_state: LiveState | string | null;
+  trainees: SessionTrainee[];
   [key: string]: unknown;
 }
 
-/**
- * Mirrors the PHP logic shared by active.php and public_session_state.php:
- * decode live_state.completedRows, then walk trainee_1..10 slots.
- */
 export function buildRowsFromSession(session: SessionOngoing): PublicSessionRow[] {
   let completedRows: Record<string, boolean> = {};
 
   if (session.live_state) {
     try {
-      const live = JSON.parse(session.live_state as string);
-      completedRows = live?.completedRows ?? {};
+      const live = typeof session.live_state === 'string'
+        ? JSON.parse(session.live_state) as LiveState
+        : session.live_state;
+      completedRows = live.completedRows ?? {};
     } catch {
       completedRows = {};
     }
   }
 
-  const rows: PublicSessionRow[] = [];
+  const assignedRows: PublicSessionRow[] = session.trainees
+    .filter((trainee) => Boolean(trainee.trainee_discord || trainee.trainee_roblox_username))
+    .sort((a, b) => a.slot_number - b.slot_number)
+    .map((trainee) => ({
+      key: `assigned-${trainee.slot_number}`,
+      slot: trainee.is_standby ? 'Standby' : trainee.slot_number,
+      group: trainee.is_standby ? 'reserved' : 'allocated',
+      discord: trainee.trainee_discord ?? '',
+      roblox: trainee.trainee_roblox_username ?? '',
+      zone: trainee.zone == null ? null : `Zone ${trainee.zone}`,
+      trainer: trainee.trainer_name ?? '',
+      // Controller row keys are zero-based; retain the one-based fallback for
+      // older live_state rows created by the previous implementation.
+      done: Boolean(completedRows[String(trainee.slot_number - 1)] ?? completedRows[String(trainee.slot_number)]),
+    }));
 
-  for (let t = 1; t <= 10; t++) {
-    const discord = session[`trainee_${t}_discord`] as string | undefined;
-    if (!discord) continue;
+  const unallocatedRows: PublicSessionRow[] = (session.live_state && (() => {
+    try {
+      return typeof session.live_state === 'string'
+        ? (JSON.parse(session.live_state) as LiveState).unallocatedTrainees
+        : session.live_state.unallocatedTrainees;
+    } catch {
+      return [];
+    }
+  })() || []).map((trainee) => ({
+    key: `unallocated-${trainee.uid}`,
+    slot: 'Unallocated',
+    group: 'reserved',
+    discord: trainee.discord,
+    roblox: trainee.roblox,
+    zone: trainee.zone || null,
+    trainer: trainee.trainerName,
+    done: false,
+  }));
 
-    rows.push({
-      slot: t,
-      discord,
-      roblox: (session[`trainee_${t}_name`] as string) ?? '',
-      zone: (session[`trainee_${t}_zone`] as string) ?? null,
-      trainer: (session[`trainee_${t}_trainer_name`] as string) ?? '',
-      // PHP checked both 0-indexed and 1-indexed completedRows entries — kept as-is
-      done: Boolean(completedRows[t - 1] ?? completedRows[t]),
-    });
-  }
-
-  return rows;
+  return [...assignedRows, ...unallocatedRows];
 }
 
-/**
- * Fetches a specific session by id, or (if none given) the most recently
- * started session — same fallback active.php used.
- */
+async function hydrateSession(
+  supabase: SupabaseClient,
+  row: Record<string, unknown> | null
+): Promise<SessionOngoing | null> {
+  if (!row) return null;
+  const sessionId = Number(row.session_id);
+  const [{ data: staffRows }, { data: trainees }] = await Promise.all([
+    supabase
+      .from('session_staff')
+      .select('role, staff_name')
+      .eq('session_id', sessionId),
+    supabase
+      .from('session_trainees')
+      .select('slot_number, is_standby, trainee_discord, trainee_roblox_username, zone, trainer_name')
+      .eq('session_id', sessionId)
+      .order('slot_number', { ascending: true }),
+  ]);
+  const hostRow = (staffRows ?? []).find(
+    (staff) => staff.role === 'HOST' || staff.role.startsWith('HOST,')
+  );
+
+  return {
+    ...row,
+    session_id: sessionId,
+    host: hostRow?.staff_name ?? '',
+    started_at: (row.started_at as string | null) ?? null,
+    live_state: (row.live_state as LiveState | string | null) ?? null,
+    trainees: (trainees ?? []) as SessionTrainee[],
+  };
+}
+
+/** Fetches an ongoing session and its normalized host/trainee child rows. */
 export async function fetchSession(
   supabase: SupabaseClient,
   sessionId?: number
@@ -69,7 +125,7 @@ export async function fetchSession(
       .select('*')
       .eq('session_id', sessionId)
       .maybeSingle();
-    return (data as SessionOngoing) ?? null;
+    return hydrateSession(supabase, data as Record<string, unknown> | null);
   }
 
   const { data } = await supabase
@@ -79,5 +135,5 @@ export async function fetchSession(
     .limit(1)
     .maybeSingle();
 
-  return (data as SessionOngoing) ?? null;
+  return hydrateSession(supabase, data as Record<string, unknown> | null);
 }

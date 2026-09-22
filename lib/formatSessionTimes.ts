@@ -1,4 +1,5 @@
 // FILE: lib/formatSessionTimes.ts
+import { formatInstantInSiteTimezone, type SiteTimezoneMode } from '@/lib/siteTimezone';
 
 export interface RelativeTime {
   text: string;
@@ -9,12 +10,6 @@ export interface SessionTimes {
   bst: string;
   local: string;
   relative: RelativeTime;
-}
-
-// PHP already baked the correct BST/GMT offset into the ISO string, so we can
-// tell which label applies just by checking the offset in it.
-export function bstOrGmtLabel(iso: string | null): 'BST' | 'GMT' {
-  return iso && iso.includes('+01:00') ? 'BST' : 'GMT';
 }
 
 export function formatRelative(d: Date): RelativeTime {
@@ -31,14 +26,12 @@ export function formatRelative(d: Date): RelativeTime {
   return { text: `in ${days} day${days === 1 ? '' : 's'}`, soon: false };
 }
 
-export function formatSessionTimes(iso: string | null): SessionTimes {
+export function formatSessionTimes(iso: string | null, timezoneMode: SiteTimezoneMode): SessionTimes {
   if (!iso) return { bst: '—', local: '', relative: { text: '', soon: false } };
 
   const d = new Date(iso);
-  const label = bstOrGmtLabel(iso);
   const bst =
-    d.toLocaleString('en-GB', {
-      timeZone: 'Europe/London',
+    formatInstantInSiteTimezone(d, timezoneMode, {
       weekday: 'short',
       day: 'numeric',
       month: 'short',
@@ -47,7 +40,7 @@ export function formatSessionTimes(iso: string | null): SessionTimes {
       hour12: false,
     }) +
     ' ' +
-    label;
+    timezoneMode;
   const local = d.toLocaleString(undefined, {
     weekday: 'short',
     day: 'numeric',

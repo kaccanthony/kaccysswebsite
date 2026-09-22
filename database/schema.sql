@@ -1,5 +1,6 @@
--- WARNING: This schema is for context only and is not meant to be run.
--- Table order and constraints may not be valid for execution.
+-- LEGACY SNAPSHOT — do not use this as the current Supabase schema.
+-- database/current_db.sql is authoritative. This file is context only and is
+-- not meant to be run; table order and constraints may not be executable.
 
 CREATE TABLE public.staff_archived (
   staff_id bigint NOT NULL,
@@ -175,16 +176,6 @@ CREATE TABLE public.session_ongoing (
   session_duration character varying NOT NULL,
   num_slots smallint NOT NULL,
   trainer_assignment_mode character varying NOT NULL DEFAULT 'auto'::character varying CHECK (trainer_assignment_mode::text = ANY (ARRAY['auto'::character varying, 'manual'::character varying]::text[])),
-  host character varying NOT NULL,
-  co_host1 character varying,
-  co_host2 character varying,
-  co_host3 character varying,
-  co_host4_supervisor character varying,
-  assistant_1 character varying,
-  assistant_2 character varying,
-  assistant_3 character varying,
-  assistant_4 character varying,
-  additional_staff character varying,
   staff_attendance character varying NOT NULL,
   session_date date NOT NULL,
   session_time character varying NOT NULL,
@@ -252,8 +243,8 @@ CREATE TABLE public.session_ongoing (
   trainee_10_trainer_name character varying,
   trainee_attendance character varying NOT NULL,
   additional_notes text,
-  live_state jsonb,
-  last_updated timestamp with time zone,
+  live_state jsonb NOT NULL DEFAULT '{}'::jsonb,
+  last_updated timestamp with time zone DEFAULT now(),
   CONSTRAINT session_ongoing_pkey PRIMARY KEY (session_id)
 );
 CREATE TABLE public.session_post_logs (
