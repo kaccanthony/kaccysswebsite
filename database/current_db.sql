@@ -217,7 +217,6 @@ CREATE TABLE public.session_full_logs (
   trainer_id bigint NOT NULL,
   trainee_notes text,
   staff_notes text,
-  trainee_assessed integer NOT NULL,
   trainee_feedback boolean NOT NULL,
   feedback_sent boolean NOT NULL
 );
@@ -234,6 +233,7 @@ CREATE TABLE public.profiles (
   id uuid NOT NULL,
   discord_id text,
   discord_username text NOT NULL,
+  discord_server_name text,
   discord_avatar_url text,
   roblox_id bigint,
   roblox_username text,

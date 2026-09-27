@@ -5,7 +5,8 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { getCurrentUser } from '@/lib/getCurrentUser';
 import { createClient } from '@/utils/supabase/server';
-import { writeStaffAndTrainees, upsertKnownTrainee } from '@/lib/sessionStaffTrainees';
+import { writeStaffAndTrainees, upsertKnownTrainees } from '@/lib/sessionStaffTrainees';
+import { findDuplicateAssignments } from '../managesession/duplicateAssignments';
 
 function fail(sessionId: number, message: string): never {
   redirect(`/setupsesh?session_id=${sessionId}&error=${encodeURIComponent(message)}`);
@@ -27,6 +28,10 @@ export async function confirmAndStartSession(formData: FormData) {
   const sessionId = parseInt((formData.get('session_id') as string) || '', 10);
   if (!sessionId) fail(0, 'Missing session ID.');
 
+  if (findDuplicateAssignments(formData).size > 0) {
+    fail(sessionId, 'Remove duplicate staff or trainee identity assignments in this session before starting.');
+  }
+
   const numSlots = parseInt((formData.get('num_slots') as string) || '0', 10);
   const reservedSlots = Math.max(0, Math.min(10, parseInt((formData.get('reserved_slots') as string) || '0', 10) || 0));
 
@@ -40,13 +45,11 @@ export async function confirmAndStartSession(formData: FormData) {
   }
 
   // Cache trainees for future autocomplete, same as managesession's saveSession.
-  for (const r of traineeRows) {
-    await upsertKnownTrainee(supabase, {
-      discordId: r.trainee_discord_id,
-      discordUsername: r.trainee_discord ?? '',
-      robloxUsername: r.trainee_roblox_username,
-    });
-  }
+  await upsertKnownTrainees(supabase, traineeRows.map((r) => ({
+    discordId: r.trainee_discord_id,
+    discordUsername: r.trainee_discord ?? '',
+    robloxUsername: r.trainee_roblox_username,
+  })));
 
   const hasHost = staffRows.some((s) => s.role === 'HOST' || s.role.startsWith('HOST,'));
   if (!hasHost) fail(sessionId, 'A Host must be assigned before starting the session.');

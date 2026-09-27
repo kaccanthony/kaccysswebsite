@@ -7,6 +7,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
 import { currentSiteTimeParts, getSiteTimezoneMode } from '@/lib/siteTimezone';
 import './setupsesh.css';
+import { SESSION_UPCOMING_COLUMNS } from '@/lib/supabase/columns';
 
 export const metadata = { title: 'Setup Session' };
 
@@ -24,7 +25,7 @@ export default async function SetupSessionPage({
 
   const { data: sessions } = await supabase
     .from('session_upcoming')
-    .select('*')
+    .select(SESSION_UPCOMING_COLUMNS)
     .eq('session_date', todayBST)
     .eq('session_booked', true)
     .in('session_status', ['Booked', 'Scheduled'])
@@ -36,8 +37,8 @@ export default async function SetupSessionPage({
   // rather than erroring, so no ternary fallback needed (that pattern is
   // what caused the never[] type error we already hit once in managesession).
   const [{ data: staffRows }, { data: traineeRows }] = await Promise.all([
-    supabase.from('session_staff').select('*').in('session_id', sessionIds),
-    supabase.from('session_trainees').select('*').in('session_id', sessionIds).order('slot_number', { ascending: true }),
+    supabase.from('session_staff').select('staff_row_id, session_id, role, staff_name, attended, notes').in('session_id', sessionIds),
+    supabase.from('session_trainees').select('trainee_row_id, session_id, slot_number, is_standby, trainee_roblox_username, trainee_discord, trainee_discord_id, zone, note, trainer_name, attended').in('session_id', sessionIds).order('slot_number', { ascending: true }),
   ]);
 
   const staffBySession = new Map<number, typeof staffRows>();

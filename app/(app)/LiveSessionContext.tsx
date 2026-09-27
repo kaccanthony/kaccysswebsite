@@ -4,7 +4,7 @@
 // AppShell's header (and back down to the page's own status pill), so both
 // places always agree instead of AppShell guessing from the URL alone.
 
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 export interface LiveSessionStatus {
   active: boolean;
@@ -21,7 +21,11 @@ interface LiveSessionContextValue {
 
 const LiveSessionContext = createContext<LiveSessionContextValue>({
   status: null,
-  now: Date.now(),
+  now: 0,
+  reportActive: () => {},
+  reportInactive: () => {},
+});
+const LiveSessionActionsContext = createContext<Pick<LiveSessionContextValue, 'reportActive' | 'reportInactive'>>({
   reportActive: () => {},
   reportInactive: () => {},
 });
@@ -29,15 +33,17 @@ const LiveSessionContext = createContext<LiveSessionContextValue>({
 export function LiveSessionProvider({
   children,
   initialStatus = null,
+  initialNow,
 }: {
   children: ReactNode;
   /** Seeded from the server (layout.tsx) so the pill can render correctly on
    * every page immediately, instead of staying blank until a client-side
    * poller on /active happens to call reportActive() first. */
   initialStatus?: LiveSessionStatus | null;
+  initialNow: number;
 }) {
   const [status, setStatus] = useState<LiveSessionStatus | null>(initialStatus);
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(initialNow);
 
   // only tick while there's actually something live to count up from
   useEffect(() => {
@@ -49,10 +55,10 @@ export function LiveSessionProvider({
   const reportActive = useCallback((changed: boolean, changedAt?: number) => {
     const reportedAt = Date.now();
     const persistedAt = Number.isFinite(changedAt) ? Number(changedAt) : null;
-    setStatus((prev) => ({
-      active: true,
-      lastChangeAt: persistedAt ?? (changed || !prev?.active ? reportedAt : prev.lastChangeAt),
-    }));
+    setStatus((prev) => {
+      const lastChangeAt = persistedAt ?? (changed || !prev?.active ? reportedAt : prev.lastChangeAt);
+      return prev?.active && prev.lastChangeAt === lastChangeAt ? prev : { active: true, lastChangeAt };
+    });
     setNow(reportedAt);
   }, []);
 
@@ -60,13 +66,21 @@ export function LiveSessionProvider({
     setStatus({ active: false, lastChangeAt: Date.now() });
   }, []);
 
+  const actions = useMemo(() => ({ reportActive, reportInactive }), [reportActive, reportInactive]);
+
   return (
-    <LiveSessionContext.Provider value={{ status, now, reportActive, reportInactive }}>
-      {children}
-    </LiveSessionContext.Provider>
+    <LiveSessionActionsContext.Provider value={actions}>
+      <LiveSessionContext.Provider value={{ status, now, ...actions }}>
+        {children}
+      </LiveSessionContext.Provider>
+    </LiveSessionActionsContext.Provider>
   );
 }
 
 export function useLiveSession() {
   return useContext(LiveSessionContext);
+}
+
+export function useLiveSessionActions() {
+  return useContext(LiveSessionActionsContext);
 }

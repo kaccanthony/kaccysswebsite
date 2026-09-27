@@ -4,18 +4,20 @@
 // combined into one form/component instead of two separate tab panels, since
 // this always submits both key sets together in one save.
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faShieldHalved, faBell, faCalendarCheck, faHourglassEnd, faBullhorn, faCalendarPlus, faXmark,
 } from '@fortawesome/free-solid-svg-icons';
 import { saveNotifications } from './actions';
+import { STAFF_TRAINEE_WARNING_OPTIONS } from '@/lib/settings';
 
 export interface StaffPrefs {
   staff_session_reminder: string;
   staff_reminder_time: string;
   staff_trainee_sound: string;
   staff_trainee_warning: string;
+  staff_trainee_warning_time: string;
   staff_announcement_enabled: string;
   staff_announcement_display: string;
 }
@@ -56,14 +58,60 @@ function requestBrowserPermission(checked: boolean, input: HTMLInputElement) {
   });
 }
 
+function WarningTimesSelect({ value, disabled }: { value: string; disabled: boolean }) {
+  const [selected, setSelected] = useState(() => value.split(',').filter(Boolean));
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [open]);
+
+  const filteredOptions = STAFF_TRAINEE_WARNING_OPTIONS.filter((option) => option.label.toLowerCase().includes(search.toLowerCase()));
+  return (
+    <div className="warning-time-select" ref={rootRef}>
+      <button type="button" className="warning-time-trigger" aria-haspopup="listbox" aria-expanded={open} disabled={disabled} onClick={() => setOpen((current) => !current)}>
+        <span>{selected.length ? `${selected.length} selected` : 'Select warning times'}</span><span aria-hidden="true">▾</span>
+      </button>
+      {open && <div className="warning-time-menu">
+        <input type="search" className="warning-time-search" placeholder="Search times…" aria-label="Search warning times" value={search} onChange={(event) => setSearch(event.target.value)} autoFocus />
+        <div role="listbox" aria-label="Warning times" aria-multiselectable="true">
+          {filteredOptions.map((option) => {
+            const checked = selected.includes(option.value);
+            return <button type="button" role="option" aria-selected={checked} key={option.value} className="warning-time-option" onClick={() => setSelected((current) => checked ? current.filter((item) => item !== option.value) : [...current, option.value])}>
+              <span className={`warning-time-check${checked ? ' selected' : ''}`} aria-hidden="true">{checked ? '✓' : ''}</span><span>{option.label}</span>
+            </button>;
+          })}
+          {filteredOptions.length === 0 && <div className="warning-time-empty">No matching times</div>}
+        </div>
+      </div>}
+      {selected.map((time) => <input key={time} type="hidden" name="staff_trainee_warning_time" value={time} disabled={disabled} />)}
+    </div>
+  );
+}
+
 export default function NotificationPreferencesForm({
-  staffPrefs, userPrefs, isStaff,
+  staffPrefs, userPrefs, showStaffSettings,
 }: {
   staffPrefs: StaffPrefs;
   userPrefs: UserPrefs;
-  isStaff: boolean;
+  showStaffSettings: boolean;
 }) {
   const [staffReminderOn, setStaffReminderOn] = useState(staffPrefs.staff_session_reminder === '1');
+  const [staffWarningOn, setStaffWarningOn] = useState(staffPrefs.staff_trainee_warning === '1');
   const [staffAnnounceOn, setStaffAnnounceOn] = useState(staffPrefs.staff_announcement_enabled === '1');
   const [userReminderOn, setUserReminderOn] = useState(userPrefs.user_session_reminder === '1');
 
@@ -72,7 +120,7 @@ export default function NotificationPreferencesForm({
   // always submits staff_* and user_* fields together in one save.
   return (
     <form action={saveNotifications}>
-      {isStaff && (
+      {showStaffSettings && (
         <div className="settings-section">
           <div className="settings-section-title">
             <FontAwesomeIcon icon={faShieldHalved} /> Staff Notifications
@@ -113,16 +161,17 @@ export default function NotificationPreferencesForm({
             </div>
           </div>
 
-          <div className="notif-card">
+          <div className="notif-card warning-notif-card">
             <div className="notif-card-left">
               <div className="notif-icon-wrap amber"><FontAwesomeIcon icon={faHourglassEnd} /></div>
               <div className="notif-info">
                 <div className="notif-title">Trainee Turn Ending Warning</div>
-                <div className="notif-desc">Notify 1 minute before the current trainee's time ends.</div>
+                <div className="notif-desc">Choose when to be warned before the current trainee&apos;s time ends.</div>
               </div>
             </div>
             <div className="notif-card-right">
-              <Toggle name="staff_trainee_warning" defaultChecked={staffPrefs.staff_trainee_warning === '1'} />
+              <WarningTimesSelect value={staffPrefs.staff_trainee_warning_time} disabled={!staffWarningOn} />
+              <Toggle name="staff_trainee_warning" defaultChecked={staffWarningOn} onChange={setStaffWarningOn} />
             </div>
           </div>
 

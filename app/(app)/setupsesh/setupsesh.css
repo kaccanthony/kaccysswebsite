@@ -153,8 +153,15 @@
 .staff-select, .staff-field select {
     background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14);
     border-radius: 8px; padding: 8px 10px; color: #fff; font-size: 0.83rem; font-family: inherit;
+    color-scheme: dark;
 }
-.staff-select option, .staff-field option { background: #1a1a1a; }
+.staff-select option, .staff-field option { background: #1a1a1a; color: #fff; }
+.staff-select optgroup, .staff-field optgroup { background: #1a1a1a; color: #ffcf80; }
+.staff-field.setup-duplicate .staff-select,
+.additional-staff-row.setup-duplicate input[name="additional_staff_name"],
+.trainee-input.setup-duplicate { border-color: #ff656d; }
+.setup-duplicate-warning { margin-left: 5px; color: #ff9090; font-size: 0.62rem; font-weight: 700; text-transform: none; letter-spacing: 0; }
+.setup-duplicate-alert { margin: 0 0 10px; color: #ff9090; font-size: 0.75rem; }
 .ih-check { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 0.7rem; color: rgba(255,255,255,0.5); cursor: pointer; }
 
 .additional-staff-row { display: flex; gap: 8px; margin-bottom: 8px; }

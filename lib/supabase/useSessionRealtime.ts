@@ -7,6 +7,7 @@
 import { useEffect, useRef } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import type { SessionOngoingRow } from '@/types/session';
+import { SESSION_ONGOING_COLUMNS } from '@/lib/supabase/columns';
 
 type Handler = (row: SessionOngoingRow) => void;
 
@@ -41,7 +42,7 @@ export function useSessionRealtime(sessionId: number, onChange: Handler) {
             fallbackTimer = setInterval(async () => {
               const { data } = await supabase
                 .from('session_ongoing')
-                .select('*')
+                .select(SESSION_ONGOING_COLUMNS)
                 .eq('session_id', sessionId)
                 .single();
               if (data) handlerRef.current(data as SessionOngoingRow);

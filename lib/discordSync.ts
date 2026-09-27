@@ -39,11 +39,25 @@ export async function syncDiscordRoles(
   });
 
   if (!res.ok) {
-    console.error(`Discord guild member lookup failed: ${res.status} ${await res.text()}`);
+    const errorBody = await res.json().catch(() => null) as { code?: number } | null;
+    if (res.status === 404 && errorBody?.code === 10007) {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ discord_server_name: null })
+        .eq('id', profileId);
+      if (error) console.error('Discord server name clear failed:', error.message);
+    }
+    console.error(`Discord guild member lookup failed: ${res.status} ${JSON.stringify(errorBody)}`);
     return;
   }
   const member = await res.json();
   const roleIds: string[] = member.roles ?? [];
+  const discordServerName = typeof member.nick === 'string' && member.nick.trim() ? member.nick.trim() : null;
+  const { error: serverNameError } = await supabase
+    .from('profiles')
+    .update({ discord_server_name: discordServerName })
+    .eq('id', profileId);
+  if (serverNameError) console.error('Discord server name sync failed:', serverNameError.message);
   console.log('Discord role sync — roles found:', roleIds);
 
   // ── Staff rank ──

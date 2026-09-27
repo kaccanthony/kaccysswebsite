@@ -31,6 +31,61 @@
 .ms-add-btn:hover { background: #e8e8e8; }
 .ms-add-btn:active { transform: scale(.96); }
 
+.timezone-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 12px;
+  background: rgba(255,255,255,.035);
+}
+.timezone-control > div { display: grid; gap: 3px; }
+.timezone-control strong { font-size: .82rem; color: rgba(255,255,255,.9); }
+.timezone-control span { font-size: .72rem; color: rgba(255,255,255,.5); }
+.timezone-toggle {
+  min-width: 148px;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 1fr 34px 1fr;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255,255,255,.15);
+  border-radius: 999px;
+  background: rgba(0,0,0,.3);
+  cursor: pointer;
+}
+.timezone-toggle i {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.15);
+}
+.timezone-toggle i::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  transition: left .18s ease;
+}
+.timezone-toggle.gmt i::after { left: 3px; }
+.timezone-toggle.bst i::after { left: 17px; }
+.timezone-toggle.gmt span:first-child,
+.timezone-toggle.bst span:last-child { color: #fff; font-weight: 700; }
+.timezone-feedback { margin-bottom: 14px; padding: 12px 14px; border-radius: 12px; font-size: .82rem; }
+.timezone-feedback.success { background: rgba(80,255,140,.10); border: 1px solid rgba(80,255,140,.25); color: #80ffb0; }
+.timezone-feedback.error { background: rgba(255,80,80,.13); border: 1px solid rgba(255,80,80,.30); color: #ff9090; }
+@media (max-width: 640px) {
+  .timezone-control { align-items: stretch; flex-direction: column; }
+  .timezone-toggle { width: 100%; }
+}
+
 .ms-search-input { padding: 9px 14px; border-radius: 9px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); color: #fff; font: inherit; font-size: .83rem; width: 220px; transition: width .2s ease, border-color .2s ease; }
 .ms-search-input:focus { outline: none; border-color: rgba(124,196,255,.5); width: 260px; }
 .ms-search-input::placeholder { color: rgba(255,255,255,.3); }

@@ -126,7 +126,7 @@ export default function ManageFeedbackInteractive({
             </div>
             <p className="delete-msg">
               This will permanently delete the feedback for <strong>{deleteTarget.trainee_name}</strong> ({deleteTarget.session_label}
-              ). This can't be undone.
+              ). This can&apos;t be undone.
             </p>
             <form action={deleteFeedback}>
               <input type="hidden" name="log_id" value={deleteTarget.log_id} />
@@ -177,6 +177,8 @@ function FeedbackForm({
     <form action={saveFeedback} className="modal-form feedback-form">
       <input type="hidden" name="action" value={mode} />
       {mode === 'edit' && log && <input type="hidden" name="log_id" value={log.log_id} />}
+      {mode === 'edit' && log && <input type="hidden" name="session_id" value={log.session_id} />}
+      {mode === 'edit' && log && <input type="hidden" name="trainee_id" value={log.trainee_id} />}
 
       <div className="detail-header-row">
         <div>

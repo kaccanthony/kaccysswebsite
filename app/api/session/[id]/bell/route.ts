@@ -5,6 +5,7 @@
 // requests without a lockfile — this route is just a thin RPC caller.
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
+import { SESSION_BELL_COLUMNS } from '@/lib/supabase/columns';
 import type { BellRole } from '@/types/session';
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -12,7 +13,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('session_bell_state')
-    .select('*')
+    .select(SESSION_BELL_COLUMNS)
     .eq('session_id', sessionId)
     .maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

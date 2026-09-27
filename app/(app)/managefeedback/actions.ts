@@ -18,7 +18,7 @@ export async function saveFeedback(formData: FormData) {
 
   const sessionId = parseInt((formData.get('session_id') as string) || '', 10);
   const traineeId = ((formData.get('trainee_id') as string) || '').trim();
-  if (!sessionId || !traineeId) fail('A session and trainee are required.');
+  if (!sessionId || (action === 'add' && !traineeId)) fail('A session and trainee are required.');
 
   const trainerId = ((formData.get('trainer_id') as string) || '').trim();
   const trainsRaw = formData.get('trains') as string;
@@ -27,7 +27,7 @@ export async function saveFeedback(formData: FormData) {
   const row = {
     session_id: sessionId,
     // kept as strings — bigint Discord snowflakes exceed JS's safe integer range
-    trainee_id: traineeId,
+    trainee_id: traineeId || null,
     trainer_id: trainerId || null,
     trains: trainsRaw ? parseInt(trainsRaw, 10) : null,
     setup: (formData.get('setup') as string) || null,

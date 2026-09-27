@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
+import { createAdminClient } from '@/utils/supabase/admin';
 import { getApiUser } from '@/lib/apiAuth';
 import { getTableConfig, type BoardConfig, type ColumnDef } from '@/lib/manageTables';
 
@@ -36,15 +37,69 @@ export async function GET(req: NextRequest) {
 
   const supabase = await createClient();
   const colNames = Object.keys(board.columns);
+  const isSessionLogTable = tableKey === 'session_full_logs' || tableKey === 'session_feedback_logs';
+  const selectColumns = isSessionLogTable
+    ? colNames.map((column) => column === 'trainee_id' || column === 'trainer_id' ? `${column}::text` : column).join(', ')
+    : colNames.join(', ');
   const { data, error } = await supabase
     .from(board.table)
-    .select(colNames.join(', '))
+    .select(selectColumns)
     .order(board.primaryKey, { ascending: false })
     .limit(500);
 
   if (error) {
     return NextResponse.json({ success: false, message: `Config/schema mismatch for this table: ${error.message}` }, { status: 500 });
   }
+
+  if (isSessionLogTable && data?.length) {
+    const traineeIds = Array.from(new Set(data.flatMap((rawRow) => {
+      const row = rawRow as unknown as Record<string, unknown>;
+      return [row.trainee_id]
+        .filter((id): id is string | number => typeof id === 'string' || typeof id === 'number')
+        .map(String)
+        .filter(Boolean);
+    })));
+    const trainerIds = Array.from(new Set(data.flatMap((rawRow) => {
+      const row = rawRow as unknown as Record<string, unknown>;
+      return [row.trainer_id]
+        .filter((id): id is string | number => typeof id === 'string' || typeof id === 'number')
+        .map(String)
+        .filter(Boolean);
+    })));
+    const traineeIdSet = new Set(traineeIds);
+    const trainerIdSet = new Set(trainerIds);
+    const allIds = Array.from(new Set([...traineeIds, ...trainerIds]));
+    const directory: Record<string, string> = {};
+    if (allIds.length) {
+      const admin = createAdminClient();
+      const [{ data: profiles }, { data: knownTrainees }, { data: roster }] = await Promise.all([
+        admin.from('profiles').select('discord_id, discord_username, discord_server_name').in('discord_id', allIds),
+        traineeIds.length
+          ? admin.from('known_trainees').select('discord_id, discord_username').in('discord_id', traineeIds)
+          : Promise.resolve({ data: [] as { discord_id: string | null; discord_username: string }[] }),
+        trainerIds.length
+          ? admin.from('staff_roster').select('discord_id, discord_username').in('discord_id', trainerIds)
+          : Promise.resolve({ data: [] as { discord_id: string; discord_username: string }[] }),
+      ]);
+      for (const row of knownTrainees ?? []) {
+        if (row.discord_id && row.discord_username) directory[`trainee_id:${row.discord_id}`] = row.discord_username;
+      }
+      for (const row of roster ?? []) {
+        if (row.discord_id && row.discord_username) directory[`trainer_id:${row.discord_id}`] = row.discord_username;
+      }
+      for (const row of profiles ?? []) {
+        if (!row.discord_id || !row.discord_username) continue;
+        if (traineeIdSet.has(row.discord_id) && !directory[`trainee_id:${row.discord_id}`]) {
+          directory[`trainee_id:${row.discord_id}`] = row.discord_username;
+        }
+        if (trainerIdSet.has(row.discord_id)) {
+          directory[`trainer_id:${row.discord_id}`] = row.discord_server_name?.trim() || row.discord_username;
+        }
+      }
+    }
+    return NextResponse.json({ success: true, rows: data, directory });
+  }
+
   return NextResponse.json({ success: true, rows: data ?? [] });
 }
 

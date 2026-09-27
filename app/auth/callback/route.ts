@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { syncDiscordRoles } from '@/lib/discordSync';
+import { NOTIF_DEFAULTS } from '@/lib/settings';
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -21,11 +22,22 @@ export async function GET(request: Request) {
       const discordId = identity?.id ?? null;
       const meta = data.user.user_metadata;
 
+      const { data: existingProfile } = await supabase
+        .from('profiles')
+        .select('notif_prefs')
+        .eq('id', data.user.id)
+        .maybeSingle();
+      const notifPrefs = {
+        ...NOTIF_DEFAULTS,
+        ...((existingProfile?.notif_prefs as Record<string, string> | null) ?? {}),
+      };
+
       const { error: upsertError } = await supabase.from('profiles').upsert({
         id: data.user.id,
         discord_id: discordId,
         discord_username: meta.full_name ?? meta.name ?? meta.user_name ?? meta.preferred_username ?? '',
         discord_avatar_url: meta.avatar_url ?? meta.picture ?? null,
+        notif_prefs: notifPrefs,
         updated_at: new Date().toISOString(),
       });
 
@@ -41,7 +53,7 @@ export async function GET(request: Request) {
         const admin = createAdminClient();
         const { data: rosterRow } = await admin
           .from('staff_roster')
-          .select('*')
+          .select('staff_rank, staff_joined, staff_perm_level, op_dept, host_auth, cohost_auth, asst_auth, comm_dept, eventh_auth, eventch_auth, ih_auth')
           .eq('discord_id', discordId)
           .eq('claimed', false)
           .maybeSingle();

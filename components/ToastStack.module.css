@@ -1,0 +1,29 @@
+.toastContainer { position: fixed; bottom: 20px; right: 20px; z-index: 700; display: flex; flex-direction: column-reverse; gap: 10px; pointer-events: none; }
+.toast { --toast-accent: #7cc4ff; position: relative; width: min(360px, calc(100vw - 28px)); overflow: hidden; pointer-events: auto; background: #151619; border: 1px solid color-mix(in srgb, var(--toast-accent) 42%, rgba(255,255,255,.14)); border-radius: 13px; padding: 13px 44px 16px 15px; box-shadow: 0 12px 32px rgba(0,0,0,.42); opacity: 0; transform: translateX(calc(100% + 28px)); }
+.toast.success { --toast-accent: #4ade80; }
+.toast.warning { --toast-accent: #f5b942; }
+.toast.error { --toast-accent: #ff656d; }
+.toast.info { --toast-accent: #7cc4ff; }
+.toast.show { animation: toastSlideIn .28s cubic-bezier(.2,.8,.2,1) forwards; }
+.toast.show.timed { animation: toastSlideIn .28s cubic-bezier(.2,.8,.2,1) forwards, toastSlideOut .28s ease 9.72s forwards; }
+.toastMsg { display: flex; align-items: flex-start; gap: 10px; font-size: .8rem; line-height: 1.4; color: rgba(255,255,255,.9); }
+.toastMsg svg { flex: 0 0 auto; margin-top: 2px; color: var(--toast-accent); }
+.toastText { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.toastActor { color: var(--toast-accent); font-size: .69rem; font-weight: 700; letter-spacing: .025em; }
+.toastDismiss { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 8px; background: transparent; color: rgba(255,255,255,.55); cursor: pointer; }
+.toastDismiss:hover { background: rgba(255,255,255,.09); color: #fff; }
+.toastDismiss:focus-visible { outline: 2px solid var(--toast-accent); outline-offset: 1px; }
+.toastTimer { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; transform-origin: left; background: var(--toast-accent); animation: toastCountdown 10s linear forwards; }
+@keyframes toastSlideIn { to { opacity: 1; transform: translateX(0); } }
+@keyframes toastSlideOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(calc(100% + 28px)); } }
+@keyframes toastCountdown { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+
+@media (max-width: 640px) {
+  .toastContainer { right: 12px; bottom: 78px; left: 12px; }
+  .toast { width: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast.show, .toastTimer { animation: none; }
+  .toast.show { opacity: 1; transform: none; }
+}

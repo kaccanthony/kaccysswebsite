@@ -3,10 +3,9 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/getCurrentUser';
 import { createClient } from '@/utils/supabase/server';
 import ManageSessionInteractive, { type SessionRow, type StaffOption } from './ManageSessionInteractive';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
-import { canManageSiteTimezone, getSiteTimezoneMode } from '@/lib/siteTimezone';
+import { getSiteTimezoneMode } from '@/lib/siteTimezone';
 import './managesession.css';
+import { SESSION_UPCOMING_COLUMNS } from '@/lib/supabase/columns';
 
 export const metadata = { title: 'Manage Sessions' };
 
@@ -31,15 +30,10 @@ interface TraineeQueryRow {
   attended: boolean;
 }
 
-export default async function ManageSessionPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ success?: string; error?: string }>;
-}) {
+export default async function ManageSessionPage() {
   const user = await getCurrentUser();
   if (user.effectivePermLevel < 10) redirect('/dashboard');
 
-  const params = await searchParams;
   const supabase = await createClient();
   const timezoneMode = await getSiteTimezoneMode(supabase);
 
@@ -47,7 +41,7 @@ export default async function ManageSessionPage({
   // and ManageSessionInteractive filters it live in the browser as you type.
   const { data: sessions } = await supabase
     .from('session_upcoming')
-    .select('*')
+    .select(SESSION_UPCOMING_COLUMNS)
     .order('session_date', { ascending: true })
     .order('session_time', { ascending: true });
 
@@ -55,8 +49,8 @@ export default async function ManageSessionPage({
 
   const [{ data: staffRowsRaw }, { data: traineeRowsRaw }] = sessionIds.length
     ? await Promise.all([
-        supabase.from('session_staff').select('*').in('session_id', sessionIds),
-        supabase.from('session_trainees').select('*').in('session_id', sessionIds).order('slot_number', { ascending: true }),
+        supabase.from('session_staff').select('staff_row_id, session_id, role, staff_name, attended, notes').in('session_id', sessionIds),
+        supabase.from('session_trainees').select('trainee_row_id, session_id, slot_number, is_standby, trainee_roblox_username, trainee_discord, trainee_discord_id, zone, note, trainer_name, attended').in('session_id', sessionIds).order('slot_number', { ascending: true }),
       ])
     : [{ data: [] }, { data: [] }];
 
@@ -130,23 +124,12 @@ export default async function ManageSessionPage({
   ].sort((a, b) => a.name.localeCompare(b.name));
 
   return (
-    <>
-      {params.error && (
-        <div className="error-banner">
-          <FontAwesomeIcon icon={faTriangleExclamation} /> {params.error}
-        </div>
-      )}
-      {params.success && <div className="success-banner">{params.success}</div>}
-
       <ManageSessionInteractive
         sessions={sessionsWithChildren as SessionRow[]}
         staff={staff}
         rawRole={user.effectiveRole}
         permLevel={user.effectivePermLevel}
         timezoneMode={timezoneMode}
-        canManageTimezone={canManageSiteTimezone(user)}
-        success={params.success}
       />
-    </>
   );
 }

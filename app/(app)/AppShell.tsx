@@ -2,12 +2,11 @@
 // FILE: app/(app)/AppShell.tsx
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/utils/supabase/client';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faUserTie } from '@fortawesome/free-solid-svg-icons';
-import { ICONS } from '@/lib/icons';
+import { faBell, faChevronDown, faCircleDot, faGear, faRightFromBracket, faUser, faUserTie } from '@fortawesome/free-solid-svg-icons';
 import { getRoleColor } from '@/lib/roles';
 import { labelForRank } from '@/lib/viewAs/rankMap';
 import { stopViewAs } from '@/app/actions/viewAs';
@@ -41,16 +40,17 @@ interface AppShellProps {
   hasLiveSession?: boolean;
   /** Persisted session_ongoing.last_updated timestamp (epoch ms). */
   liveSessionLastChangeAt?: number | null;
+  serverNow?: number;
   children: React.ReactNode;
 }
 
 export default function AppShell(props: AppShellProps) {
-  const { hasLiveSession = false, liveSessionLastChangeAt = null, ...rest } = props;
+  const { hasLiveSession = false, liveSessionLastChangeAt = null, serverNow = 0, ...rest } = props;
   return (
     <LiveSessionProvider initialStatus={{
       active: hasLiveSession,
-      lastChangeAt: liveSessionLastChangeAt ?? Date.now(),
-    }}>
+      lastChangeAt: liveSessionLastChangeAt ?? serverNow,
+    }} initialNow={serverNow}>
       <AppShellInner {...rest} />
     </LiveSessionProvider>
   );
@@ -182,7 +182,7 @@ function AppShellInner({ user, assignedSessions, unreadCount, viewingAs = null, 
           <LiveStatusPill />
           <Link href="/notifications" className="bell-btn" aria-label="Notifications">
 
-            <FontAwesomeIcon icon={ICONS.bell} />
+            <FontAwesomeIcon icon={faBell} />
 
             {unreadCount > 0 && (
 
@@ -198,19 +198,19 @@ function AppShellInner({ user, assignedSessions, unreadCount, viewingAs = null, 
             onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
           >
             <div className="avatar" style={{ background: roleColor }}>
-              {user.avatarUrl ? <img src={user.avatarUrl} alt="Avatar" draggable={false} /> : <FontAwesomeIcon icon={ICONS.user} />}
+              {user.avatarUrl ? <img src={user.avatarUrl} alt="Avatar" draggable={false} /> : <FontAwesomeIcon icon={faUser} />}
             </div>
             <div className="profile-meta">
               <span className="profile-name">{user.username}</span>
               <span className="profile-role">{user.role}</span>
             </div>
-            <FontAwesomeIcon icon={ICONS.chevronDown} className={`chev${open ? ' open' : ''}`} />
+            <FontAwesomeIcon icon={faChevronDown} className={`chev${open ? ' open' : ''}`} />
           </button>
 
           <div ref={popupRef} className={`profile-popup${open ? ' open' : ''}`}>
             <div className="popup-header">
               <div className="popup-avatar" style={{ background: roleColor }}>
-                {user.avatarUrl ? <img src={user.avatarUrl} alt="Avatar" draggable={false} /> : <FontAwesomeIcon icon={ICONS.user} />}
+                {user.avatarUrl ? <img src={user.avatarUrl} alt="Avatar" draggable={false} /> : <FontAwesomeIcon icon={faUser} />}
               </div>
               <div>
                 <div className="popup-name">{user.username}</div>
@@ -221,20 +221,20 @@ function AppShellInner({ user, assignedSessions, unreadCount, viewingAs = null, 
             <div className="popup-section-label">Assigned Sessions</div>
             <div className="popup-sessions">
               {assignedSessions.length === 0 ? (
-                <span className="session-pill"><FontAwesomeIcon icon={ICONS.circleDot} /> No assigned sessions</span>
+                <span className="session-pill"><FontAwesomeIcon icon={faCircleDot} /> No assigned sessions</span>
               ) : (
                 assignedSessions.map((s) => (
                   <span key={s.sessionId} className="session-pill">
-                    <FontAwesomeIcon icon={ICONS.circleDot} /> {s.label}
+                    <FontAwesomeIcon icon={faCircleDot} /> {s.label}
                   </span>
                 ))
               )}
             </div>
 
             <div className="popup-divider" />
-            <a href="/settings" className="popup-item"><FontAwesomeIcon icon={ICONS.gear} /> Settings</a>
+            <a href="/settings" className="popup-item"><FontAwesomeIcon icon={faGear} /> Settings</a>
             <button className="popup-item danger" onClick={handleLogout}>
-              <FontAwesomeIcon icon={ICONS.signOut} /> Log out
+              <FontAwesomeIcon icon={faRightFromBracket} /> Log out
             </button>
           </div>
         </div>

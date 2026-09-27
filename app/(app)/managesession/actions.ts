@@ -5,16 +5,16 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { getCurrentUser } from '@/lib/getCurrentUser';
 import { createClient } from '@/utils/supabase/server';
-import { buildStaffRowsFromForm, buildTraineeRowsFromForm } from '@/lib/sessionStaffTrainees';
+import { buildStaffRowsFromForm, buildTraineeRowsFromForm, replaceSessionChildren } from '@/lib/sessionStaffTrainees';
+import { findDuplicateAssignments } from './duplicateAssignments';
 import {
   canManageSiteTimezone,
   parseSiteTimezone,
   SITE_TIMEZONE_SETTING_KEY,
 } from '@/lib/siteTimezone';
 
-function fail(message: string): never {
-  redirect(`/managesession?error=${encodeURIComponent(message)}`);
-}
+type SessionActionResult = { success: boolean; message: string };
+const failure = (message: string): SessionActionResult => ({ success: false, message });
 
 /**
  * Upserts one trainee into the known_trainees cache — matched by discord_id
@@ -53,49 +53,60 @@ async function upsertKnownTrainee(
   }
 }
 
-export async function deleteSession(formData: FormData) {
+export async function deleteSession(formData: FormData): Promise<SessionActionResult> {
   const user = await getCurrentUser();
-  if (user.permLevel < 15) fail('You do not have permission to delete sessions.');
+  if (user.permLevel < 15) return failure('You do not have permission to delete sessions.');
 
   const sessionId = parseInt(formData.get('session_id') as string, 10);
   const supabase = await createClient();
 
   // session_staff / session_trainees have no FK-cascade guarantee shown in the
   // schema, so clean them up explicitly before removing the session itself.
-  await Promise.all([
-    supabase.from('session_staff').delete().eq('session_id', sessionId),
-    supabase.from('session_trainees').delete().eq('session_id', sessionId),
-  ]);
-  await supabase.from('session_upcoming').delete().eq('session_id', sessionId);
+  const { error } = await supabase.rpc('delete_upcoming_session', { p_session_id: sessionId });
+  if (error?.code === 'PGRST202') {
+    const children = await Promise.all([
+      supabase.from('session_staff').delete().eq('session_id', sessionId),
+      supabase.from('session_trainees').delete().eq('session_id', sessionId),
+    ]);
+    const childError = children.find((result) => result.error)?.error;
+    if (childError) return failure(childError.message);
+    const { error: deleteError } = await supabase.from('session_upcoming').delete().eq('session_id', sessionId);
+    if (deleteError) return failure(deleteError.message);
+  } else if (error) {
+    return failure(error.message);
+  }
 
   revalidatePath('/managesession');
-  redirect('/managesession?success=' + encodeURIComponent('Session deleted.'));
+  return { success: true, message: 'Session deleted.' };
 }
 
 // Staff normalization is shared with the final Setup Session save so both
 // entry points persist identical role codes and Internal Helper placement.
-export async function saveSession(formData: FormData) {
+export async function saveSession(formData: FormData): Promise<SessionActionResult> {
   const user = await getCurrentUser();
-  if (user.permLevel < 10) fail('You do not have permission to manage sessions.');
+  if (user.permLevel < 10) return failure('You do not have permission to manage sessions.');
 
   const action = formData.get('action') as string; // 'add' | 'edit'
   const numSlots = parseInt((formData.get('num_slots') as string) || '0', 10);
   const reservedSlots = Math.max(0, Math.min(10, parseInt((formData.get('reserved_slots') as string) || '0', 10) || 0));
 
+  if (findDuplicateAssignments(formData).size > 0) {
+    return failure('Remove duplicate staff or trainee identity assignments in this session before saving.');
+  }
+
   // ── Primary roles ──
-  const pendingStaffRows = (() => {
-    try {
-      return buildStaffRowsFromForm(formData, 0);
-    } catch (error) {
-      fail(error instanceof Error ? error.message : 'Invalid staff assignments.');
-    }
-  })();
+  let pendingStaffRows: ReturnType<typeof buildStaffRowsFromForm>;
+  try {
+    pendingStaffRows = buildStaffRowsFromForm(formData, 0);
+  } catch (error) {
+    return failure(error instanceof Error ? error.message : 'Invalid staff assignments.');
+  }
 
   const sessionDate = formData.get('session_date') as string;
-  if (!sessionDate) fail('Invalid or missing session date.');
+  if (!sessionDate) return failure('Invalid or missing session date.');
 
   const sessionTime = formData.get('session_time') as string;
-  if (!/^\d{2}:\d{2}$/.test(sessionTime)) fail('Invalid or missing session time.');
+  if (!/^\d{2}:\d{2}$/.test(sessionTime)) return failure('Invalid or missing session time.');
 
   const supabase = await createClient();
 
@@ -127,13 +138,13 @@ export async function saveSession(formData: FormData) {
         supabase.from('session_ongoing').select('session_id', { count: 'exact', head: true }).eq('session_id', customId),
       ]);
       if ((c1 ?? 0) + (c2 ?? 0) > 0) {
-        fail(`Session ID #${customId} is already in use — pick a different one or leave it blank to auto-assign.`);
+        return failure(`Session ID #${customId} is already in use — pick a different one or leave it blank to auto-assign.`);
       }
     }
 
     const insertPayload = customId ? { session_id: customId, ...sessionRow } : sessionRow;
     const { data: inserted, error } = await supabase.from('session_upcoming').insert(insertPayload).select('session_id').single();
-    if (error || !inserted) fail(error?.message ?? 'Could not create session.');
+    if (error || !inserted) return failure(error?.message ?? 'Could not create session.');
     sessionId = inserted.session_id;
 
     if (customId) {
@@ -142,43 +153,40 @@ export async function saveSession(formData: FormData) {
     }
   } else {
     sessionId = parseInt(formData.get('session_id') as string, 10);
-    if (!sessionId) fail('Missing session ID.');
+    if (!sessionId) return failure('Missing session ID.');
 
     const { error } = await supabase.from('session_upcoming').update(sessionRow).eq('session_id', sessionId);
-    if (error) fail(error.message);
+    if (error) return failure(error.message);
   }
 
   // ── Replace session_staff for this session entirely (simplest correct way
   // to sync a form save against a child table with no natural per-row key
   // coming from the client). ──
-  await supabase.from('session_staff').delete().eq('session_id', sessionId);
-
   const staffRows = pendingStaffRows.map((row) => ({ ...row, session_id: sessionId }));
 
-  if (staffRows.length > 0) {
-    const { error: staffError } = await supabase.from('session_staff').insert(staffRows);
-    if (staffError) fail(staffError.message);
-  }
-
   // ── Replace session_trainees for this session entirely ──
-  await supabase.from('session_trainees').delete().eq('session_id', sessionId);
-
   const traineeRows = buildTraineeRowsFromForm(formData, sessionId, numSlots, reservedSlots);
 
-  if (traineeRows.length > 0) {
-    const { error: traineeError } = await supabase.from('session_trainees').insert(traineeRows);
-    if (traineeError) fail(traineeError.message);
+  try {
+    await replaceSessionChildren(supabase, sessionId, staffRows, traineeRows);
+  } catch (error) {
+    revalidatePath('/managesession');
+    return failure(error instanceof Error ? error.message : 'Could not save session assignments.');
+  }
 
+  if (traineeRows.length > 0) {
     // Cache/update each filled trainee slot in known_trainees for future
     // autocomplete — matched by discord_id (or username if no id given), so
     // someone appearing in multiple sessions gets ONE row that stays fresh,
     // not a pile of stale duplicates.
-    for (const r of traineeRows) {
-      await upsertKnownTrainee(supabase, {
-        discordId: r.trainee_discord_id ? String(r.trainee_discord_id) : null,
-        discordUsername: (r.trainee_discord as string) ?? '',
-        robloxUsername: (r.trainee_roblox_username as string) ?? null,
-      });
+    const entries = traineeRows.map((r) => ({
+      discordId: r.trainee_discord_id ? String(r.trainee_discord_id) : null,
+      discordUsername: (r.trainee_discord as string) ?? '',
+      robloxUsername: (r.trainee_roblox_username as string) ?? null,
+    }));
+    const { error: cacheError } = await supabase.rpc('upsert_known_trainees_batch', { p_entries: entries });
+    if (cacheError?.code === 'PGRST202') {
+      for (const entry of entries) await upsertKnownTrainee(supabase, entry);
     }
   }
 
@@ -192,15 +200,16 @@ export async function saveSession(formData: FormData) {
         : 'Session saved.';
 
   revalidatePath('/managesession');
-  redirect('/managesession?success=' + encodeURIComponent(msg));
+  return { success: true, message: msg };
 }
 
 export async function updateSiteTimezone(formData: FormData) {
+  const failTimezone = (message: string): never => redirect(`/manage?panel=timezone&error=${encodeURIComponent(message)}`);
   const user = await getCurrentUser();
-  if (!canManageSiteTimezone(user)) fail('You do not have permission to change site timezone.');
+  if (!canManageSiteTimezone(user)) failTimezone('You do not have permission to change site timezone.');
 
   const requestedValue = formData.get('timezone_mode');
-  if (requestedValue !== 'GMT' && requestedValue !== 'BST') fail('Invalid timezone mode.');
+  if (requestedValue !== 'GMT' && requestedValue !== 'BST') failTimezone('Invalid timezone mode.');
   const timezoneMode = parseSiteTimezone(requestedValue);
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -214,11 +223,12 @@ export async function updateSiteTimezone(formData: FormData) {
     .select('setting_value')
     .single();
 
-  if (error || !data) fail(`Could not update timezone. Run database/site_timezone.sql first. ${error?.message ?? 'Setting row was not found.'}`);
+  if (error || !data) failTimezone(`Could not update timezone. Run database/site_timezone.sql first. ${error?.message ?? 'Setting row was not found.'}`);
 
   revalidatePath('/', 'layout');
+  revalidatePath('/manage');
   revalidatePath('/managesession');
   revalidatePath('/upcomingsesh');
   revalidatePath('/setupsesh');
-  redirect(`/managesession?success=${encodeURIComponent(`Site timezone changed to ${timezoneMode}.`)}`);
+  redirect(`/manage?panel=timezone&success=${encodeURIComponent(`Site timezone changed to ${timezoneMode}.`)}`);
 }

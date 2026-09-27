@@ -1,7 +1,7 @@
 'use client';
 // FILE: app/(app)/setup/SetupSessionInteractive.tsx
 
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faPlay, faClock, faHourglassHalf, faIdBadge, faCrown, faUserTie, faUserGear, faUser,
@@ -15,6 +15,7 @@ import { parseTraineePaste, looksLikeSameDate, checkRequiredSessionFields, check
 import { lookupKnownTrainee, validateHostRank, resolveHostByDiscordId } from '../managesession/traineeActions';
 import { searchTraineeCandidates, type TraineeSuggestion } from '@/lib/profileSearch';
 import { confirmAndStartSession } from './actions';
+import { findDuplicateAssignments } from '../managesession/duplicateAssignments';
 import type { SiteTimezoneMode } from '@/lib/siteTimezone';
 
 function statusClass(status: string) {
@@ -25,6 +26,10 @@ function additionalStaffFrom(staffRows: StaffChildRow[]) {
   return staffRows
     .filter((r) => r.role.startsWith('Add T. '))
     .map((r) => ({ name: r.staff_name, roleName: r.role.slice('Add T. '.length) }));
+}
+
+function DuplicateWarning({ visible }: { visible: boolean }) {
+  return visible ? <span className="setup-duplicate-warning" role="status">Duplicate</span> : null;
 }
 
 /** Round-robin distribution of trainees across host + co-hosts, for auto trainer mode. */
@@ -243,6 +248,10 @@ function SetupModal({
   onClose: () => void;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
+  const [duplicateFields, setDuplicateFields] = useState<Set<string>>(() => new Set());
+  const updateDuplicateWarnings = useCallback(() => {
+    if (formRef.current) setDuplicateFields(findDuplicateAssignments(new FormData(formRef.current)));
+  }, []);
   const [trainerMode, setTrainerMode] = useState<'auto' | 'manual'>('auto');
   const [reservedSlots, setReservedSlots] = useState(
     () => session.traineeRows.filter((row) => row.is_standby).length
@@ -250,6 +259,10 @@ function SetupModal({
   const [additionalRows, setAdditionalRows] = useState(() =>
     additionalStaffFrom(session.staffRows).map((r, i) => ({ key: i, ...r }))
   );
+  useEffect(() => {
+    const frame = requestAnimationFrame(updateDuplicateWarnings);
+    return () => cancelAnimationFrame(frame);
+  }, [updateDuplicateWarnings, reservedSlots, additionalRows]);
   const nextRowKey = useRef(additionalRows.length);
 
   // live host/co-host values feed the auto-distribution preview — read
@@ -329,6 +342,13 @@ function SetupModal({
           <form
             ref={formRef}
             action={confirmAndStartSession}
+            onChange={updateDuplicateWarnings}
+            onSubmit={(event) => {
+              const duplicates = findDuplicateAssignments(new FormData(event.currentTarget));
+              if (duplicates.size === 0) return;
+              event.preventDefault();
+              setDuplicateFields(duplicates);
+            }}
             className="modal-form-setup"
           >
             <input type="hidden" name="session_id" value={session.session_id} />
@@ -337,9 +357,10 @@ function SetupModal({
             <input type="hidden" name="trainer_assignment_mode" value={trainerMode} />
 
             <div className="modal-section-label">Staff Assignment</div>
+            {duplicateFields.size > 0 && <div className="setup-duplicate-alert" role="alert">Remove duplicate staff or trainee identities before starting.</div>}
             <div className="staff-grid">
-              <div className="staff-field">
-                <label className="staff-label"><FontAwesomeIcon icon={faCrown} className="staff-icon" /> Host*</label>
+              <div className={`staff-field${duplicateFields.has('host') ? ' setup-duplicate' : ''}`}>
+                <label className="staff-label"><FontAwesomeIcon icon={faCrown} className="staff-icon" /> Host* <DuplicateWarning visible={duplicateFields.has('host')} /></label>
                 <StaffSelect
                   name="host"
                   staff={staff}
@@ -349,40 +370,40 @@ function SetupModal({
                   selectRef={hostRef}
                 />
               </div>
-              <div className="staff-field">
-                <label className="staff-label">Co-Host 1</label>
+              <div className={`staff-field${duplicateFields.has('co_host1') ? ' setup-duplicate' : ''}`}>
+                <label className="staff-label">Co-Host 1 <DuplicateWarning visible={duplicateFields.has('co_host1')} /></label>
                 <StaffSelect name="co_host1" staff={staff} authKey="cohost_auth" defaultValue={ch1Match} onChange={recomputeAutoPreview} selectRef={ch1Ref} />
               </div>
-              <div className="staff-field">
-                <label className="staff-label">Co-Host 2</label>
+              <div className={`staff-field${duplicateFields.has('co_host2') ? ' setup-duplicate' : ''}`}>
+                <label className="staff-label">Co-Host 2 <DuplicateWarning visible={duplicateFields.has('co_host2')} /></label>
                 <StaffSelect name="co_host2" staff={staff} authKey="cohost_auth" defaultValue={ch2Match} onChange={recomputeAutoPreview} selectRef={ch2Ref} />
               </div>
-              <div className="staff-field">
-                <label className="staff-label">Co-Host 3</label>
+              <div className={`staff-field${duplicateFields.has('co_host3') ? ' setup-duplicate' : ''}`}>
+                <label className="staff-label">Co-Host 3 <DuplicateWarning visible={duplicateFields.has('co_host3')} /></label>
                 <StaffSelect name="co_host3" staff={staff} authKey="cohost_auth" defaultValue={ch3Match} onChange={recomputeAutoPreview} selectRef={ch3Ref} />
                 <label className="ih-check">
                   <input type="checkbox" name="co_host3_ih" defaultChecked={hasIH(session.staffRows, 'CH_3')} /> Internal Helper
                 </label>
               </div>
-              <div className="staff-field">
-                <label className="staff-label">Co-Host 4 / SV</label>
+              <div className={`staff-field${duplicateFields.has('co_host4_supervisor') ? ' setup-duplicate' : ''}`}>
+                <label className="staff-label">Co-Host 4 / SV <DuplicateWarning visible={duplicateFields.has('co_host4_supervisor')} /></label>
                 <StaffSelect name="co_host4_supervisor" staff={staff} authKey="cohost_auth" defaultValue={ch4Match} />
                 <label className="ih-check">
                   <input type="checkbox" name="co_host4_ih" defaultChecked={hasIH(session.staffRows, 'CH_4')} /> Internal Helper
                 </label>
               </div>
               {ast.map((match, i) => (
-                <div className="staff-field" key={i}>
-                  <label className="staff-label">Assistant {i + 1}</label>
+                <div className={`staff-field${duplicateFields.has(`assistant_${i + 1}`) ? ' setup-duplicate' : ''}`} key={i}>
+                  <label className="staff-label">Assistant {i + 1} <DuplicateWarning visible={duplicateFields.has(`assistant_${i + 1}`)} /></label>
                   <StaffSelect name={`assistant_${i + 1}`} staff={staff} authKey="asst_auth" defaultValue={match} />
                 </div>
               ))}
             </div>
 
             <div className="staff-field" style={{ marginTop: 10 }}>
-              <label className="staff-label">Additional Staff (first standalone IH fills Co-Host 4 / SV)</label>
+              <label className="staff-label">Additional Staff (first standalone IH fills Co-Host 4 / SV) <DuplicateWarning visible={duplicateFields.has('additional_staff_name')} /></label>
               {additionalRows.map((row) => (
-                <div className="additional-staff-row" key={row.key}>
+                <div className={`additional-staff-row${duplicateFields.has('additional_staff_name') ? ' setup-duplicate' : ''}`} key={row.key}>
                   <input type="text" name="additional_staff_name" defaultValue={row.name} placeholder="Staff name" list="setup-staff-names" />
                   <input type="text" name="additional_staff_role" defaultValue={row.roleName} placeholder="Role — e.g. Internal Helper" />
                   <button type="button" className="row-remove-btn" onClick={() => removeAdditionalRow(row.key)}>
@@ -416,6 +437,8 @@ function SetupModal({
                   autoTrainer={autoPreview[n - 1] ?? ''}
                   sessionDateISO={session.session_date}
                   sessionHost={findPrimaryStaff(session.staffRows, 'HOST')}
+                  duplicateFields={duplicateFields}
+                  onIdentityChange={updateDuplicateWarnings}
                 />
               );
             })}
@@ -455,7 +478,7 @@ function SetupModal({
 
 // ── One trainee row, with quick-fill (search known trainees, or paste) ──
 function TraineeRow({
-  n, label, isReserved, defaultRow, trainerMode, autoTrainer, sessionDateISO, sessionHost,
+  n, label, isReserved, defaultRow, trainerMode, autoTrainer, sessionDateISO, sessionHost, duplicateFields, onIdentityChange,
 }: {
   n: number;
   label: string;
@@ -465,6 +488,8 @@ function TraineeRow({
   autoTrainer: string;
   sessionDateISO: string;
   sessionHost: string;
+  duplicateFields: Set<string>;
+  onIdentityChange: () => void;
 }) {
   const robloxRef = useRef<HTMLInputElement>(null);
   const discordRef = useRef<HTMLInputElement>(null);
@@ -499,6 +524,7 @@ function TraineeRow({
     if (discordRef.current) discordRef.current.value = m.discordUsername;
     if (discordIdRef.current && m.discordId) discordIdRef.current.value = m.discordId;
     if (robloxRef.current && m.robloxUsername) robloxRef.current.value = m.robloxUsername;
+    onIdentityChange();
     setQuickFillOpen(false);
     setResults([]);
     setQuery('');
@@ -552,6 +578,7 @@ function TraineeRow({
     if (robloxRef.current) robloxRef.current.value = parsed.robloxUsername;
     if (zoneRef.current) zoneRef.current.value = parsed.zone;
     if (noteRef.current) noteRef.current.value = parsed.notes;
+    onIdentityChange();
 
     const warnings: string[] = [];
     if (!looksLikeSameDate(parsed.dateTime, sessionDateISO)) {
@@ -571,6 +598,7 @@ function TraineeRow({
     const match = await lookupKnownTrainee(discordIdRef.current?.value ?? '', discordRef.current.value);
     if (match && robloxRef.current && !robloxRef.current.value) {
       robloxRef.current.value = match.robloxUsername ?? '';
+      onIdentityChange();
     }
   }
 
@@ -578,7 +606,7 @@ function TraineeRow({
     <div className="trainee-slot">
       {isReserved && <input type="hidden" name={`trainee_${n}_standby`} value="on" />}
       <div className="trainee-slot-header">
-        <span className="trainee-slot-label">{label}</span>
+        <span className="trainee-slot-label">{label} <DuplicateWarning visible={['roblox', 'discord', 'discord_id'].some((field) => duplicateFields.has(`trainee_${n}_${field}`))} /></span>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <button type="button" className="btn-paste" onClick={() => setQuickFillOpen((o) => !o)}>
             <FontAwesomeIcon icon={faMagnifyingGlass} /> Quick-fill
@@ -641,9 +669,9 @@ function TraineeRow({
 
       <div className="trainee-row-input-grid">
         <span className="trainee-row-num">{n}</span>
-        <input ref={robloxRef} className="trainee-input" type="text" name={`trainee_${n}_roblox`} defaultValue={defaultRow?.trainee_roblox_username ?? ''} placeholder="Roblox username" />
-        <input ref={discordRef} className="trainee-input" type="text" name={`trainee_${n}_discord`} defaultValue={defaultRow?.trainee_discord ?? ''} placeholder="Discord username" onBlur={handleDiscordBlur} />
-        <input ref={discordIdRef} className="trainee-input" type="text" name={`trainee_${n}_discord_id`} defaultValue={defaultRow?.trainee_discord_id ?? ''} placeholder="Discord ID" />
+        <input ref={robloxRef} className={`trainee-input${duplicateFields.has(`trainee_${n}_roblox`) ? ' setup-duplicate' : ''}`} aria-invalid={duplicateFields.has(`trainee_${n}_roblox`)} type="text" name={`trainee_${n}_roblox`} defaultValue={defaultRow?.trainee_roblox_username ?? ''} placeholder="Roblox username" />
+        <input ref={discordRef} className={`trainee-input${duplicateFields.has(`trainee_${n}_discord`) ? ' setup-duplicate' : ''}`} aria-invalid={duplicateFields.has(`trainee_${n}_discord`)} type="text" name={`trainee_${n}_discord`} defaultValue={defaultRow?.trainee_discord ?? ''} placeholder="Discord username" onBlur={handleDiscordBlur} />
+        <input ref={discordIdRef} className={`trainee-input${duplicateFields.has(`trainee_${n}_discord_id`) ? ' setup-duplicate' : ''}`} aria-invalid={duplicateFields.has(`trainee_${n}_discord_id`)} type="text" name={`trainee_${n}_discord_id`} defaultValue={defaultRow?.trainee_discord_id ?? ''} placeholder="Discord ID" />
         <input ref={zoneRef} className="trainee-zone-field" type="number" name={`trainee_${n}_zone`} defaultValue={defaultRow?.zone ?? ''} placeholder="Zone" />
       </div>
       <div className="trainee-row-input-grid" style={{ marginTop: 6 }}>

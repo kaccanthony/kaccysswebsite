@@ -173,6 +173,25 @@ export async function writeStaffAndTrainees(
   const staffRows = buildStaffRowsFromForm(formData, sessionId);
   const traineeRows = buildTraineeRowsFromForm(formData, sessionId, numSlots, reservedSlots);
 
+  await replaceSessionChildren(supabase, sessionId, staffRows, traineeRows);
+
+  return { staffRows, traineeRows };
+}
+
+export async function replaceSessionChildren(
+  supabase: SupabaseClient,
+  sessionId: number,
+  staffRows: StaffRowInput[],
+  traineeRows: TraineeRowInput[]
+): Promise<void> {
+  const { error: rpcError } = await supabase.rpc('replace_session_children', {
+    p_session_id: sessionId,
+    p_staff: staffRows,
+    p_trainees: traineeRows,
+  });
+  if (!rpcError) return;
+  if (rpcError.code !== 'PGRST202') throw new Error(rpcError.message);
+
   await supabase.from('session_staff').delete().eq('session_id', sessionId);
   if (staffRows.length > 0) {
     const { error } = await supabase.from('session_staff').insert(staffRows);
@@ -184,8 +203,6 @@ export async function writeStaffAndTrainees(
     const { error } = await supabase.from('session_trainees').insert(traineeRows);
     if (error) throw new Error(error.message);
   }
-
-  return { staffRows, traineeRows };
 }
 
 /**
@@ -221,4 +238,17 @@ export async function upsertKnownTrainee(
       last_seen_at: new Date().toISOString(),
     });
   }
+}
+
+/** One network request for a form's trainees. Falls back during SQL rollout. */
+export async function upsertKnownTrainees(
+  supabase: SupabaseClient,
+  entries: { discordId: string | null; discordUsername: string; robloxUsername: string | null }[]
+): Promise<void> {
+  if (entries.length === 0) return;
+  const { error } = await supabase.rpc('upsert_known_trainees_batch', { p_entries: entries });
+  if (error?.code === 'PGRST202') {
+    for (const entry of entries) await upsertKnownTrainee(supabase, entry);
+  }
+  // Individual cache-write errors were previously ignored by the callers.
 }

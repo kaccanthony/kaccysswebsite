@@ -19,10 +19,13 @@ import { postNotification } from '@/app/actions/postNotification';
 import { searchProfiles, type ProfileSuggestion } from '@/lib/profileSearch';
 import { VIEWABLE_RANKS, labelForRank } from '@/lib/viewAs/rankMap';
 import type { SiteTimezoneMode } from '@/lib/siteTimezone';
+import { updateSiteTimezone } from '../managesession/actions';
 
 const REALTIME_ENABLED = true; // flip off if you'd rather not run a channel per board
+const TIMEZONE_BOARD_KEY = 'site_timezone';
 
 type Row = Record<string, any>;
+type ApiJson = { success?: boolean; message?: string; directory?: Record<string, string>; rows?: Row[] };
 type Groups = Record<string, [string, BoardConfig][]>;
 type SortDirection = 'default' | 'asc' | 'desc';
 type TableColumn = { key: string; definition: ColumnDef };
@@ -92,6 +95,24 @@ function formatStaffRosterJson(raw: any) {
   }
   if (lines.length === 0) return <span className="ms-empty-value">—</span>;
   return <div className="ms-json-summary">{lines}</div>;
+}
+
+function formatRuntimeSeconds(raw: unknown) {
+  if (raw === null || raw === undefined || raw === '') return '—';
+  const seconds = Number(raw);
+  if (!Number.isFinite(seconds)) return String(raw ?? '—');
+  const total = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function formatUtcTimestamp(raw: unknown) {
+  if (raw === null || raw === undefined || raw === '') return '—';
+  const date = new Date(String(raw));
+  if (Number.isNaN(date.getTime())) return String(raw);
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
 }
 
 type CellRenderer = (columnKey: string, definition: ColumnDef, row: Row) => ReactNode;
@@ -295,8 +316,18 @@ function ManageBoardTable({
 interface ToastMsg { id: number; message: string; type: 'success' | 'error'; show: boolean; }
 
 export default function ManageBoard({
-  permLevel, groups, title, viewingAs, timezoneMode = 'BST',
-}: { permLevel: number; groups: Groups; title?: string; viewingAs?: ViewAsState | null; timezoneMode?: SiteTimezoneMode }) {
+  permLevel, groups, title, viewingAs, timezoneMode = 'BST', canManageTimezone = false,
+  initialTimezonePanel = false, timezoneFeedback = null,
+}: {
+  permLevel: number;
+  groups: Groups;
+  title?: string;
+  viewingAs?: ViewAsState | null;
+  timezoneMode?: SiteTimezoneMode;
+  canManageTimezone?: boolean;
+  initialTimezonePanel?: boolean;
+  timezoneFeedback?: { type: 'success' | 'error'; message: string } | null;
+}) {
   const supabase = useMemo(() => createClient(), []);
 
   const allBoards = useMemo(() => {
@@ -305,8 +336,9 @@ export default function ManageBoard({
     return flat;
   }, [groups]);
 
-  const [currentTable, setCurrentTable] = useState<string | null>(allBoards[0]?.[0] ?? null);
+  const [currentTable, setCurrentTable] = useState<string | null>(initialTimezonePanel && canManageTimezone ? TIMEZONE_BOARD_KEY : allBoards[0]?.[0] ?? null);
   const cfg: BoardConfig | null = currentTable ? allBoards.find(([k]) => k === currentTable)?.[1] ?? null : null;
+  const showingTimezone = canManageTimezone && currentTable === TIMEZONE_BOARD_KEY;
   const tableColumns = useMemo<TableColumn[]>(
     () => cfg ? Object.entries(cfg.columns).map(([key, definition]) => ({ key, definition })) : [],
     [cfg]
@@ -318,6 +350,16 @@ export default function ManageBoard({
   const [searchTerm, setSearchTerm] = useState('');
   const [sortState, setSortState] = useState<{ col: string | null; dir: SortDirection }>({ col: null, dir: 'default' });
   const [directory, setDirectory] = useState<Record<string, string>>({});
+  const inFlightReads = useRef(new Map<string, Promise<ApiJson>>());
+  const readJson = useCallback((url: string): Promise<ApiJson> => {
+    const existing = inFlightReads.current.get(url);
+    if (existing) return existing;
+    const request = fetch(url).then((response) => response.json() as Promise<ApiJson>).finally(() => {
+      inFlightReads.current.delete(url);
+    });
+    inFlightReads.current.set(url, request);
+    return request;
+  }, []);
   const [contentPhase, setContentPhase] = useState<'visible' | 'leaving' | 'entering'>('visible');
 
   const [recordModal, setRecordModal] = useState<{ open: boolean; row: Row | null }>({ open: false, row: null });
@@ -344,13 +386,12 @@ export default function ManageBoard({
 
   const loadDirectory = useCallback(async () => {
     try {
-      const res = await fetch('/api/manage/directory');
-      const data = await res.json();
-      if (data.success) setDirectory(data.directory);
+      const data = await readJson('/api/manage/directory');
+      if (data.success && data.directory) setDirectory(data.directory);
     } catch {
       /* resolveId columns just fall back to raw ids */
     }
-  }, []);
+  }, [readJson]);
 
   const loadBoard = useCallback(
     async (table: string, boardCfg: BoardConfig) => {
@@ -359,14 +400,14 @@ export default function ManageBoard({
       setContentPhase('leaving');
       try {
         const url = table === 'staff_directory' ? endpointFor(table) : `${endpointFor(table)}?table=${encodeURIComponent(table)}`;
-        const res = await fetch(url);
-        const data = await res.json();
+        const data = await readJson(url);
         if (!data.success) {
           setLoadError(data.message || 'Failed to load.');
           setRows([]);
         } else {
           setRows(data.rows ?? []);
-          if (needsDirectory(boardCfg)) await loadDirectory();
+          if (data.directory) setDirectory((current) => ({ ...current, ...data.directory }));
+          else if (needsDirectory(boardCfg)) await loadDirectory();
         }
       } catch (err) {
         setLoadError(String(err));
@@ -379,13 +420,14 @@ export default function ManageBoard({
         }, 160);
       }
     },
-    [loadDirectory]
+    [loadDirectory, readJson]
   );
 
   const selectBoard = (table: string) => {
     setCurrentTable(table);
     setSearchTerm('');
     setSortState({ col: null, dir: 'default' });
+    if (table === TIMEZONE_BOARD_KEY) setContentPhase('visible');
     const boardCfg = allBoards.find(([k]) => k === table)?.[1];
     if (boardCfg && !boardCfg.comingSoon && boardCfg.displayMode !== 'view_as') loadBoard(table, boardCfg);
   };
@@ -494,7 +536,7 @@ export default function ManageBoard({
   const forceConcludeSession = async (sessionId: number) => {
     if (!confirm(`Force conclude session #${sessionId}? This archives it into the session logs and removes it from live sessions — this can't be undone.`)) return;
     try {
-      const res = await fetch('/api/sessionongoing/conclude', {
+      const res = await fetch(`/api/session/${sessionId}/bell/conclude`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sessionId }),
@@ -514,8 +556,13 @@ export default function ManageBoard({
   // ── cell formatting ──
   const formatCellFor = useCallback<CellRenderer>((col, def, row) => {
     const rawValue = row[col];
-    const resolvedValue = def.resolveId ? directory[rawValue] : undefined;
+    const idKey = String(rawValue ?? '');
+    const resolvedValue = def.resolveId
+      ? directory[`${col}:${idKey}`] ?? directory[idKey]
+      : undefined;
     const value = resolvedValue ?? rawValue;
+    if (col === 'session_runtime_actual') return formatRuntimeSeconds(value);
+    if (col === 'started_at' || col === 'ended_at') return formatUtcTimestamp(value);
     const unresolved = !!def.resolveId
       && !resolvedValue
       && rawValue !== null
@@ -595,15 +642,31 @@ export default function ManageBoard({
               </div>
             );
           })}
+          {canManageTimezone && (
+            <div>
+              <div className="ms-group-label">Site Settings</div>
+              <button
+                type="button"
+                data-table={TIMEZONE_BOARD_KEY}
+                className={`ms-board-btn ${showingTimezone ? 'active' : ''}`}
+                onClick={() => selectBoard(TIMEZONE_BOARD_KEY)}
+              >
+                <span className="ms-board-dot" />
+                Session &amp; Event Timezone
+              </button>
+            </div>
+          )}
         </aside>
 
         {/* ── Main board area ── */}
         <main className="ms-main">
           <div className="ms-board-header">
             <div>
-              <h1 className="ms-board-title">{cfg ? cfg.label : 'Select a board'}</h1>
+              <h1 className="ms-board-title">{showingTimezone ? 'Session and Event Timezone' : cfg ? cfg.label : 'Select a board'}</h1>
               <p className="ms-board-sub">
-                {!cfg
+                {showingTimezone
+                  ? 'Change when the UK switches between BST and GMT.'
+                  : !cfg
                   ? 'Pick something from the sidebar to get started.'
                   : cfg.displayMode === 'view_as'
                   ? 'Temporarily browse the site as a different rank or person.'
@@ -641,7 +704,9 @@ export default function ManageBoard({
           </div>
 
           <div className={`ms-board-content ms-content-${contentPhase === 'visible' ? 'visible' : contentPhase}`}>
-            {!cfg ? null : cfg.displayMode === 'view_as' ? (
+            {showingTimezone ? (
+              <TimezonePanel timezoneMode={timezoneMode} feedback={timezoneFeedback} />
+            ) : !cfg ? null : cfg.displayMode === 'view_as' ? (
             <ViewAsPanel viewingAs={viewingAs ?? null} />
             ) : cfg.comingSoon ?  (
               <div className="ms-coming-soon-panel">
@@ -760,6 +825,46 @@ export default function ManageBoard({
           </div>
         ))}
       </div>
+    </>
+  );
+}
+
+function TimezonePanel({
+  timezoneMode, feedback,
+}: {
+  timezoneMode: SiteTimezoneMode;
+  feedback: { type: 'success' | 'error'; message: string } | null;
+}) {
+  return (
+    <>
+      {feedback && <div className={`timezone-feedback ${feedback.type}`} role="status">{feedback.message}</div>}
+      <form
+        action={updateSiteTimezone}
+        className="timezone-control"
+        onSubmit={(event) => {
+          const nextMode = timezoneMode === 'BST' ? 'GMT' : 'BST';
+          if (!window.confirm(
+            `Change site timezone from ${timezoneMode} to ${nextMode}? Existing session and event clock values stay unchanged, but their UTC interpretation shifts by one hour.`
+          )) event.preventDefault();
+        }}
+      >
+        <div>
+          <strong>Session and event timezone</strong>
+          <span>Supabase remains UTC. Site wall-clock mode: {timezoneMode}.</span>
+        </div>
+        <input type="hidden" name="timezone_mode" value={timezoneMode === 'BST' ? 'GMT' : 'BST'} />
+        <button
+          type="submit"
+          className={`timezone-toggle ${timezoneMode.toLowerCase()}`}
+          role="switch"
+          aria-checked={timezoneMode === 'BST'}
+          aria-label={`Change site timezone to ${timezoneMode === 'BST' ? 'GMT' : 'BST'}`}
+        >
+          <span>GMT</span>
+          <i aria-hidden="true" />
+          <span>BST</span>
+        </button>
+      </form>
     </>
   );
 }

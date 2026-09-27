@@ -24,7 +24,7 @@ export const getCurrentUserOrNull = cache(async (): Promise<CurrentUser | null> 
   const [{ data: profile }, { data: staffProfile }, { data: adminRow }] = await Promise.all([
     supabase
       .from('profiles')
-      .select('discord_username, discord_avatar_url, roblox_username, roblox_avatar_url')
+      .select('discord_username, discord_server_name, discord_avatar_url, roblox_username, roblox_avatar_url')
       .eq('id', authUser.id)
       .single(),
     supabase.from('staff_profiles')
@@ -38,7 +38,7 @@ export const getCurrentUserOrNull = cache(async (): Promise<CurrentUser | null> 
   const isAdmin = !!adminRow;
   const rawRole = staffProfile?.staff_rank ?? '';
   const permLevel = staffProfile?.staff_perm_level ?? (isAdmin ? 20 : 0);
-  const username = profile?.discord_username || authUser.user_metadata?.user_name || 'Member';
+  const username = profile?.discord_server_name || profile?.discord_username || authUser.user_metadata?.user_name || 'Member';
 
   const realAuths = {
     op_dept: staffProfile?.op_dept ?? false,

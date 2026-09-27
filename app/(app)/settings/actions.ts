@@ -10,6 +10,7 @@ import {
   USER_KEYS,
   CHECKBOX_KEYS,
   mergePrefs,
+  STAFF_TRAINEE_WARNING_OPTIONS,
 } from '@/lib/settings';
 
 async function requireUserId(supabase: Awaited<ReturnType<typeof createClient>>) {
@@ -71,7 +72,13 @@ export async function saveNotifications(formData: FormData) {
   const nextPrefs = { ...currentPrefs };
 
   for (const key of allowedKeys) {
-    if (CHECKBOX_KEYS.has(key)) {
+    if (key === 'staff_trainee_warning_time') {
+      const selectedTimes = [...new Set(formData.getAll(key).map(String).filter((value) =>
+        STAFF_TRAINEE_WARNING_OPTIONS.some((option) => option.value === value)
+      ))];
+      if (selectedTimes.length > 0) nextPrefs[key] = selectedTimes.join(',');
+      else if (formData.get('staff_trainee_warning') === 'on') nextPrefs[key] = '';
+    } else if (CHECKBOX_KEYS.has(key)) {
       nextPrefs[key] = formData.get(key) === 'on' ? '1' : '0';
     } else {
       nextPrefs[key] = String(formData.get(key) ?? NOTIF_DEFAULTS[key] ?? '');

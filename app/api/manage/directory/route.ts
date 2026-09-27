@@ -18,9 +18,12 @@ export async function GET() {
   const supabase = await createClient();
   const map: Record<string, string> = {};
 
-  const { data: profiles } = await supabase.from('profiles').select('id, discord_username');
+  const { data: profiles } = await supabase.from('profiles').select('id, discord_id, discord_username');
   for (const p of profiles ?? []) {
-    if (p.discord_username) map[p.id] = p.discord_username;
+    if (p.discord_username) {
+      map[p.id] = p.discord_username;
+      if (p.discord_id) map[p.discord_id] = p.discord_username;
+    }
   }
 
   const { data: archived } = await supabase.from('staff_archived').select('staff_id, staff_display_name, staff_name');

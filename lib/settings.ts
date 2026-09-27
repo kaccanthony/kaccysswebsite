@@ -21,13 +21,14 @@ import type { SupabaseClient } from '@supabase/supabase-js';
  */
 
 export const NOTIF_DEFAULTS: Record<string, string> = {
-  staff_session_reminder: '1',
+  staff_session_reminder: '0',
   staff_reminder_time: '15',
   staff_trainee_sound: '1',
   staff_trainee_warning: '1',
-  staff_announcement_display: 'fullscreen',
+  staff_trainee_warning_time: '60',
+  staff_announcement_display: 'toast',
   staff_announcement_enabled: '1',
-  user_session_reminder: '1',
+  user_session_reminder: '0',
   user_reminder_time: '15',
   user_trainee_sound: '1',
   user_new_session: '1',
@@ -35,11 +36,27 @@ export const NOTIF_DEFAULTS: Record<string, string> = {
   user_browser_notifs: '1',
 };
 
+export const STAFF_TRAINEE_WARNING_OPTIONS = [
+  { seconds: 300, value: '300', label: '5 min' },
+  { seconds: 180, value: '180', label: '3 min' },
+  { seconds: 120, value: '120', label: '2 min' },
+  { seconds: 90, value: '90', label: '1 min 30 sec before' },
+  { seconds: 60, value: '60', label: '1 min' },
+  { seconds: 30, value: '30', label: '30 sec' },
+  { seconds: 20, value: '20', label: '20 sec' },
+] as const;
+
+export function parseStaffTraineeWarningTimes(value: string | null | undefined): number[] {
+  const allowed = new Set<number>(STAFF_TRAINEE_WARNING_OPTIONS.map((option) => option.seconds));
+  return [...new Set((value ?? '').split(',').map(Number).filter((seconds) => allowed.has(seconds)))];
+}
+
 export const STAFF_KEYS = [
   'staff_session_reminder',
   'staff_reminder_time',
   'staff_trainee_sound',
   'staff_trainee_warning',
+  'staff_trainee_warning_time',
   'staff_announcement_enabled',
   'staff_announcement_display',
 ] as const;

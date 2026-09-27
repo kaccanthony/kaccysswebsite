@@ -1,5 +1,3 @@
-'use client';
-
 // FILE: components/VersionBadge.tsx
 // Position per your request: lower-LEFT. Note: the original version_badge.php
 // had this at bottom-right — flag if you actually wanted to keep it there.
@@ -9,9 +7,6 @@ export default function VersionBadge() {
   return (
     <div
       aria-hidden="true"
-      onMouseDown={(e) => e.preventDefault()}
-      onContextMenu={(e) => e.preventDefault()}
-      onCopy={(e) => e.preventDefault()}
       style={{
         position: 'fixed',
         bottom: 10,

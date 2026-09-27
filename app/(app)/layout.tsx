@@ -5,6 +5,10 @@ import AppShell, { type AssignedSession } from './AppShell';
 import { createClient } from '@/utils/supabase/server';
 import { currentSiteTimeParts, getSiteTimezoneMode } from '@/lib/siteTimezone';
 
+function serverRenderTime(): number {
+  return Date.now();
+}
+
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser(); // redirects to /login internally if not signed in
   const supabase = await createClient();
@@ -22,6 +26,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // instead of which column matched.
   const assignedSessions: AssignedSession[] = [];
   const myDisplayName = user.effectiveUsername;
+  let assignedStaffRows: { session_id: number; role: string }[] | null = null;
 
   const ROLE_LABELS: Record<string, string> = {
     HOST: 'Host', CH_1: 'CH 1', CH_2: 'CH 2', CH_3: 'CH 3', CH_4: 'CH 4 / SV',
@@ -42,7 +47,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
     if (staffErr) {
       console.error('session_staff lookup failed:', staffErr.message);
-    } else if (staffRows && staffRows.length > 0) {
+    } else {
+      assignedStaffRows = staffRows ?? [];
+    }
+    if (staffRows && staffRows.length > 0 && !staffErr) {
       const roleBySession = new Map(staffRows.map((r) => [r.session_id, r.role]));
       const sessionIds = staffRows.map((r) => r.session_id);
 
@@ -101,10 +109,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   let hasLiveSession = false;
   let liveSessionLastChangeAt: number | null = null;
   if (myDisplayName) {
-    const { data: staffForLive } = await supabase
-      .from('session_staff')
-      .select('session_id')
-      .eq('staff_name', myDisplayName);
+    let staffForLive: { session_id: number }[] | null = assignedStaffRows;
+    if (staffForLive === null) {
+      const { data } = await supabase
+        .from('session_staff')
+        .select('session_id')
+        .eq('staff_name', myDisplayName);
+      staffForLive = data;
+    }
 
     if (staffForLive && staffForLive.length > 0) {
       const { data: liveMatch } = await supabase
@@ -125,6 +137,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
       <AppShell
+        serverNow={serverRenderTime()}
         user={{
           username: displayName,
           role: roleLabel,

@@ -1,6 +1,7 @@
 // FILE: lib/activeSession.ts
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { LiveState } from '@/types/session';
+import { SESSION_ONGOING_COLUMNS } from '@/lib/supabase/columns';
 
 export interface PublicSessionRow {
   key: string;
@@ -122,7 +123,7 @@ export async function fetchSession(
   if (sessionId) {
     const { data } = await supabase
       .from('session_ongoing')
-      .select('*')
+      .select(SESSION_ONGOING_COLUMNS)
       .eq('session_id', sessionId)
       .maybeSingle();
     return hydrateSession(supabase, data as Record<string, unknown> | null);
@@ -130,7 +131,7 @@ export async function fetchSession(
 
   const { data } = await supabase
     .from('session_ongoing')
-    .select('*')
+    .select(SESSION_ONGOING_COLUMNS)
     .order('started_at', { ascending: false })
     .limit(1)
     .maybeSingle();

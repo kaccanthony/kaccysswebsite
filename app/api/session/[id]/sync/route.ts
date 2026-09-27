@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import type { DriverRow, LiveState, StaffShiftRow } from '@/types/session';
+import { SESSION_ONGOING_COLUMNS } from '@/lib/supabase/columns';
 
 const ONGOING_COLUMNS = new Set([
   'session_status', 'additional_notes', 'session_date', 'session_time', 'trainee_timer',
@@ -71,7 +72,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const supabase = await createClient();
   const { data: session, error } = await supabase
     .from('session_ongoing')
-    .select('*')
+    .select(SESSION_ONGOING_COLUMNS)
     .eq('session_id', sessionId)
     .single();
 
@@ -112,7 +113,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     { data: currentTrainees, error: traineeReadError },
     { data: currentDrivers, error: driverReadError },
   ] = await Promise.all([
-    supabase.from('session_ongoing').select('*').eq('session_id', sessionId).maybeSingle(),
+    supabase.from('session_ongoing').select(SESSION_ONGOING_COLUMNS).eq('session_id', sessionId).maybeSingle(),
     supabase.from('profiles').select('discord_username').eq('id', user.id).maybeSingle(),
     supabase.from('site_admins').select('id').eq('id', user.id).maybeSingle(),
     supabase
@@ -307,12 +308,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const actorAssignments = (assignedStaff ?? []).filter(
       (row) => String(row.staff_name ?? '').trim().toLowerCase() === username
     );
-    const actorCanManageAdditions = actorAssignments.some((row) =>
+    const hostName = String((current.live_state as LiveState | null)?.sessionHost ?? '').trim().toLowerCase();
+    const actorIsHost = Boolean(username && hostName && username === hostName);
+    const actorCanManageAdditions = Boolean(adminRow) || actorIsHost || actorAssignments.some((row) =>
       row.role === 'HOST' || row.role.startsWith('HOST,') || row.role === 'AST_1' || row.role.startsWith('AST_1,')
     );
     const persistedOverrides = ((current.live_state as LiveState | null)?.overrides ?? {});
     const effectiveOverrides = { ...persistedOverrides, ...(incomingLiveState.overrides ?? {}) };
-    const staffAdditionAllowed = effectiveOverrides['staff-addition'] ?? true;
+    const allowAll = effectiveOverrides['allow-all'] === true;
+    const staffAdditionAllowed = allowAll || (effectiveOverrides['staff-addition'] ?? false);
     const requestsNewStaff = incomingLiveState.staffShift.some((rawRow) => {
       if (!rawRow || typeof rawRow !== 'object') return false;
       const row = rawRow as StaffShiftRow;
@@ -324,7 +328,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         || String(candidate.staff_name).trim().toLowerCase() === staffName.toLowerCase()
       );
     });
-    if (requestsNewStaff && (!staffAdditionAllowed || !actorCanManageAdditions)) {
+    if (requestsNewStaff && (!staffAdditionAllowed || (!allowAll && !actorCanManageAdditions))) {
       return NextResponse.json(
         { success: false, message: !staffAdditionAllowed ? 'Staff addition is disabled by the Host.' : 'Only the Host or Main AST can add staff.' },
         { status: 403 }
@@ -337,7 +341,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (!rawRow || typeof rawRow !== 'object') continue;
       const row = rawRow as StaffShiftRow;
       const staffName = String(row.discord ?? '').trim();
-      if (!staffName) continue;
+      if (!staffName) {
+        // Keep the client-side empty row until a staff member is selected;
+        // it is not a database record and should not disappear on sync.
+        normalizedRows.push({ ...row, discord: '' });
+        continue;
+      }
       const requestedId = Number(row.sourceRowId);
       const existing = existingNonHosts.find((candidate) =>
         (Number.isSafeInteger(requestedId) && candidate.staff_row_id === requestedId) ||
@@ -456,7 +465,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       ? updateQuery.eq('last_updated', currentRow.last_updated)
       : updateQuery.is('last_updated', null);
 
-    const { data: fresh, error } = await updateQuery.select('*').maybeSingle();
+    const { data: fresh, error } = await updateQuery.select(SESSION_ONGOING_COLUMNS).maybeSingle();
     if (error) return NextResponse.json({ success: false, message: error.message }, { status: 500 });
     if (fresh) {
       return NextResponse.json({
@@ -469,7 +478,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const { data: latest, error: refreshError } = await database
       .from('session_ongoing')
-      .select('*')
+      .select(SESSION_ONGOING_COLUMNS)
       .eq('session_id', sessionId)
       .maybeSingle();
     if (refreshError) {

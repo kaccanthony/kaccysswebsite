@@ -220,15 +220,16 @@ export function getTableConfig(): Record<string, BoardConfig> {
         session_desc: { label: 'Description', type: 'textarea' },
         session_status: { label: 'Final Status', type: 'text', pill: true },
         session_date: { label: 'Date', type: 'date' },
+        session_time: { label: 'Scheduled Time', type: 'text' },
         session_duration_expected: { label: 'Expected Duration', type: 'text' },
-        session_runtime_actual: { label: 'Actual Runtime (s)', type: 'number' },
+        session_runtime_actual: { label: 'Actual Runtime', type: 'number' },
         num_slots: { label: 'Planned Slots', type: 'number' },
         actual_slots_provided: { label: 'Actual Slots', type: 'number' },
+        additional_slots_provided: { label: 'Additional Slots', type: 'number' },
         additional_notes: { label: 'Additional Notes', type: 'textarea' },
         main_ast_notes: { label: 'Main AST Notes', type: 'textarea' },
-        started: { label: 'Started', type: 'text' },
-        ended: { label: 'Ended', type: 'text' },
-        concluded_at: { label: 'Concluded At', type: 'text', editableOnUpdate: false },
+        started_at: { label: 'Started At (UTC)', type: 'text' },
+        ended_at: { label: 'Concluded At (UTC)', type: 'text' },
       },
     },
     session_staff_logs: {
@@ -262,16 +263,13 @@ export function getTableConfig(): Record<string, BoardConfig> {
       columns: {
         log_id: { label: 'Log ID', type: 'number', editableOnUpdate: false },
         session_id: { label: 'Session ID', type: 'number' },
-        trainee_id: { label: 'Trainee Discord ID', type: 'text', resolveId: true },
+        trainee_id: { label: 'Trainee', type: 'text', resolveId: true },
         trainee_roblox: { label: 'Roblox Username', type: 'text' },
         trainee_zone: { label: 'Zone', type: 'number' },
         trainee_attendance: { label: 'Attended', type: 'bool' },
-        trainer_id: { label: 'Trainer Discord ID', type: 'text', resolveId: true },
+        trainer_id: { label: 'Trainer', type: 'text', resolveId: true },
         trainee_notes: { label: 'Trainee Notes', type: 'textarea' },
         staff_notes: { label: 'Staff Notes', type: 'textarea' },
-        // NOTE: real schema column is `integer NOT NULL`, not boolean like the old PHP UI
-        // implied — kept as a number field on purpose. See MIGRATION_NOTES.md.
-        trainee_assessed: { label: 'Assessed (score)', type: 'number' },
         trainee_feedback: { label: 'Has Feedback', type: 'bool' },
         feedback_sent: { label: 'Feedback Sent', type: 'bool' },
       },
@@ -286,7 +284,7 @@ export function getTableConfig(): Record<string, BoardConfig> {
       columns: {
         log_id: { label: 'Log ID', type: 'number', editableOnUpdate: false },
         session_id: { label: 'Session ID', type: 'number' },
-        trainee_id: { label: 'Trainee Discord ID', type: 'text', resolveId: true },
+        trainee_id: { label: 'Trainee', type: 'text', resolveId: true },
         trainer_id: { label: 'Trainer Discord ID', type: 'text', resolveId: true },
         trains: { label: 'Trains', type: 'number' },
         setup: { label: 'Setup', type: 'text' },
@@ -297,6 +295,7 @@ export function getTableConfig(): Record<string, BoardConfig> {
         notes: { label: 'Notes', type: 'textarea' },
         setup_seconds: { label: 'Setup Time (s)', type: 'number' },
         created_at: { label: 'Created', type: 'text', editableOnCreate: false, editableOnUpdate: false },
+        updated_at: { label: 'Updated', type: 'text', editableOnCreate: false, editableOnUpdate: false },
       },
     },
     session_driver_logs: {
@@ -373,6 +372,7 @@ export function getTableConfig(): Record<string, BoardConfig> {
         discord_avatar_url: { label: 'Discord Avatar', type: 'discord_avatar', editableOnUpdate: false },
         discord_username: { label: 'Discord Username', type: 'text' }, // editable for edge-case fixes —
         // heads up: this WILL get overwritten next time your Discord sync job runs for that user
+        discord_server_name: { label: 'Discord Server Name', type: 'text', editableOnUpdate: false },
         roblox_avatar_url: { label: 'Roblox Avatar', type: 'discord_avatar', editableOnUpdate: false },
         roblox_username: { label: 'Roblox Username', type: 'text' },
         nationality: { label: 'Nationality', type: 'text' },

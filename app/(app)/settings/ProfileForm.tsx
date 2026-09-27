@@ -107,10 +107,11 @@ export default function ProfileForm({
               <div className="form-input-wrap">
                 <FontAwesomeIcon icon={faDiscordBrand} className="form-input-icon" />
                 <input
-                  type="text"
-                  name="discord_username"
-                  className="form-input readonly"
-                  maxLength={isStaff ? 200 : 100}
+                    type="text"
+                    name="discord_username"
+                    className="form-input readonly"
+                    readOnly
+                    maxLength={isStaff ? 200 : 100}
                   placeholder="your_discord_username"
                   defaultValue={discordUsername}
                 />
@@ -132,10 +133,11 @@ export default function ProfileForm({
               <div className="form-input-wrap">
                 <FontAwesomeIcon icon={faGamepad} className="form-input-icon" />
                 <input
-                  type="text"
-                  name="roblox_name"
-                  className="form-input readonly"
-                  maxLength={100}
+                    type="text"
+                    name="roblox_name"
+                    className="form-input readonly"
+                    readOnly
+                    maxLength={100}
                   placeholder="Your Roblox username"
                   defaultValue={robloxName}
                 />

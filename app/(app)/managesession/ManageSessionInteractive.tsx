@@ -8,13 +8,15 @@ import {
   faPen, faTrash, faTimes, faCrown, faPlus, faEnvelopeOpenText,
   faMagnifyingGlass, faXmark, faClipboard,
 } from '@fortawesome/free-solid-svg-icons';
-import { saveSession, deleteSession, updateSiteTimezone } from './actions';
+import { saveSession, deleteSession } from './actions';
+import ToastStack, { type ToastEntry, type ToastKind } from '@/components/ToastStack';
 import QuickAddTrainee from './QuickAddTrainee';
 import GlobalQuickFillTrainee from './GlobalQuickFillTrainee';
 import { parseTraineePaste, looksLikeSameDate, checkRequiredSessionFields, checkIdentityFields, checkIdentityFieldFormats } from './parseTraineePaste';
 import { lookupKnownTrainee, searchKnownTrainees, validateHostRank, resolveHostByDiscordId, type KnownTraineeMatch } from './traineeActions';
 import { useModalVisibility } from '@/lib/useModalVisibility';
 import type { SiteTimezoneMode } from '@/lib/siteTimezone';
+import { findDuplicateAssignments } from './duplicateAssignments';
 
 const DRAFT_KEY = 'managesession_draft';
 const SESSION_VIRTUALIZATION_THRESHOLD = 50;
@@ -22,6 +24,9 @@ const SESSION_VIRTUAL_OVERSCAN = 8;
 const ESTIMATED_SESSION_ROW_HEIGHT = 68;
 const estimateSessionRowHeight = () => ESTIMATED_SESSION_ROW_HEIGHT;
 const PRIMARY_ROLE_CODES = ['HOST', 'CH_1', 'CH_2', 'CH_3', 'CH_4', 'AST_1', 'AST_2', 'AST_3', 'AST_4'];
+function DuplicateWarning({ visible, label }: { visible: boolean; label: string }) {
+  return visible ? <span className="duplicate-warning" role="status" aria-label={label} title={label}>Duplicate</span> : null;
+}
 
 export interface StaffOption {
   name: string;
@@ -380,16 +385,12 @@ export default function ManageSessionInteractive({
   rawRole,
   permLevel,
   timezoneMode,
-  canManageTimezone,
-  success,
 }: {
   sessions: SessionRow[];
   staff: StaffOption[];
   rawRole: string;
   permLevel: number;
   timezoneMode: SiteTimezoneMode;
-  canManageTimezone: boolean;
-  success?: string;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const { shouldRender, visible } = useModalVisibility(modalOpen);
@@ -397,10 +398,17 @@ export default function ManageSessionInteractive({
   const [numSlots, setNumSlots] = useState(4);
   const [reservedSlots, setReservedSlots] = useState(0);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
+  const [toasts, setToasts] = useState<ToastEntry[]>([]);
+  const dismissToast = useCallback((id: number) => setToasts((current) => current.filter((toast) => toast.id !== id)), []);
+  const showToast = useCallback((message: string, kind: ToastKind) => {
+    const id = Date.now() + Math.random();
+    setToasts((current) => [...current, { id, message, kind, actorName: 'Manage Sessions' }]);
+  }, []);
   const [statusValue, setStatusValue] = useState('Requested');
   const [bookedValue, setBookedValue] = useState(false);
   const [timeDigits, setTimeDigits] = useState(''); // raw digits only, e.g. "1430" — colon is derived, never stored
   const [additionalStaffRows, setAdditionalStaffRows] = useState<{ name: string; role: string }[]>([]);
+  const [duplicateFields, setDuplicateFields] = useState<Set<string>>(() => new Set());
   const [hasInternal, setHasInternal] = useState(false);
 
   // Inline quick-fill — one slot's panel open at a time, rendered directly
@@ -417,6 +425,12 @@ export default function ManageSessionInteractive({
 
   const formRef = useRef<HTMLFormElement>(null);
   const pendingDraftFillRef = useRef<Record<string, string> | null>(null);
+
+  const updateDuplicateWarnings = useCallback(() => {
+    if (!formRef.current) return;
+    const next = findDuplicateAssignments(new FormData(formRef.current));
+    setDuplicateFields((current) => current.size === next.size && [...next].every((field) => current.has(field)) ? current : next);
+  }, []);
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -637,6 +651,7 @@ export default function ManageSessionInteractive({
     setTraineeField(n, 'zone', parsed.zone);
     if (parsed.position) setTraineeField(n, 'trainer', parsed.position);
     if (parsed.notes) setTraineeField(n, 'note', parsed.notes);
+    updateDuplicateWarnings();
 
     if (warnings.length > 0) {
       setPasteWarning(warnings.join(' '));
@@ -665,6 +680,7 @@ export default function ManageSessionInteractive({
     setTraineeField(quickFillSlot, 'roblox', match.robloxUsername ?? '');
     setTraineeField(quickFillSlot, 'discord', match.discordUsername);
     setTraineeField(quickFillSlot, 'discord_id', match.discordId ?? '');
+    updateDuplicateWarnings();
     closeQuickFill();
   }
 
@@ -691,9 +707,16 @@ export default function ManageSessionInteractive({
     pendingDraftFillRef.current = null;
   }, [modalOpen, editing, numSlots, reservedSlots]);
 
+  useEffect(() => {
+    if (!modalOpen || !shouldRender) return;
+    const frame = requestAnimationFrame(updateDuplicateWarnings);
+    return () => cancelAnimationFrame(frame);
+  }, [modalOpen, shouldRender, editing, numSlots, reservedSlots, additionalStaffRows, updateDuplicateWarnings]);
+
   // Autosave every change to localStorage — Add mode only. Editing an
   // existing session already has safe data sitting in the DB.
   function handleFormChange() {
+    updateDuplicateWarnings();
     if (editing || !formRef.current) return;
     const entries = Array.from(new FormData(formRef.current).entries());
     const data: Record<string, string> = {};
@@ -708,13 +731,31 @@ export default function ManageSessionInteractive({
     localStorage.setItem(DRAFT_KEY, JSON.stringify(data));
   }
 
-  // Confirmed success (redirected back with ?success=...) means whatever
-  // was in progress actually saved — safe to clear the draft.
-  useEffect(() => {
-    if (success) {
-      localStorage.removeItem(DRAFT_KEY);
+  async function handleSave(formData: FormData) {
+    try {
+      const result = await saveSession(formData);
+      if (result.success) {
+        localStorage.removeItem(DRAFT_KEY);
+        setModalOpen(false);
+      }
+      showToast(result.message, result.success ? 'success' : 'error');
+    } catch {
+      showToast('Could not save session. Please try again.', 'error');
     }
-  }, [success]);
+  }
+
+  async function handleDelete(formData: FormData) {
+    try {
+      const result = await deleteSession(formData);
+      if (result.success) {
+        localStorage.removeItem(DRAFT_KEY);
+        setDeleteTarget(null);
+      }
+      showToast(result.message, result.success ? 'success' : 'error');
+    } catch {
+      showToast('Could not delete session. Please try again.', 'error');
+    }
+  }
 
   const standbyRows = editing?.traineeRows
     .filter((row) => row.is_standby)
@@ -755,36 +796,6 @@ export default function ManageSessionInteractive({
           </div>
         )}
       </div>
-
-      {canManageTimezone && (
-        <form
-          action={updateSiteTimezone}
-          className="timezone-control"
-          onSubmit={(event) => {
-            const nextMode = timezoneMode === 'BST' ? 'GMT' : 'BST';
-            if (!window.confirm(
-              `Change site timezone from ${timezoneMode} to ${nextMode}? Existing session and event clock values stay unchanged, but their UTC interpretation shifts by one hour.`
-            )) event.preventDefault();
-          }}
-        >
-          <div>
-            <strong>Session and event timezone</strong>
-            <span>Supabase remains UTC. Site wall-clock mode: {timezoneMode}.</span>
-          </div>
-          <input type="hidden" name="timezone_mode" value={timezoneMode === 'BST' ? 'GMT' : 'BST'} />
-          <button
-            type="submit"
-            className={`timezone-toggle ${timezoneMode.toLowerCase()}`}
-            role="switch"
-            aria-checked={timezoneMode === 'BST'}
-            aria-label={`Change site timezone to ${timezoneMode === 'BST' ? 'GMT' : 'BST'}`}
-          >
-            <span>GMT</span>
-            <i aria-hidden="true" />
-            <span>BST</span>
-          </button>
-        </form>
-      )}
 
       <div className="filter-bar">
         <div className="search-wrap">
@@ -864,7 +875,18 @@ export default function ManageSessionInteractive({
                 <button className="modal-close-btn" onClick={() => setModalOpen(false)}><FontAwesomeIcon icon={faTimes} /></button>
               </div>
 
-              <form ref={formRef} action={saveSession} onChange={handleFormChange} className="modal-form">
+              <form
+                ref={formRef}
+                action={handleSave}
+                onChange={handleFormChange}
+                onSubmit={(event) => {
+                  const duplicates = findDuplicateAssignments(new FormData(event.currentTarget));
+                  if (duplicates.size === 0) return;
+                  event.preventDefault();
+                  setDuplicateFields(duplicates);
+                }}
+                className="modal-form"
+              >
                 <input type="hidden" name="action" value={editing ? 'edit' : 'add'} />
                 <input type="hidden" name="reserved_slots" value={reservedSlots} />
                 {editing && <input type="hidden" name="session_id" value={editing.session_id} />}
@@ -965,7 +987,7 @@ export default function ManageSessionInteractive({
 
                 <div className="form-row">
                   <div className="form-group flex2">
-                    <label><FontAwesomeIcon icon={faCrown} style={{ color: 'rgba(255,210,80,.7)', fontSize: '.7rem', marginRight: 4 }} /> Host*</label>
+                    <label className="assignment-label"><FontAwesomeIcon icon={faCrown} style={{ color: 'rgba(255,210,80,.7)', fontSize: '.7rem', marginRight: 4 }} /> Host* <DuplicateWarning visible={duplicateFields.has('host')} label="Duplicate staff" /></label>
                     <StaffSelect name="host" staff={staff} authKey="host_auth" defaultValue={editing ? findPrimaryStaff(editing.staffRows, 'HOST') : ''} />
                   </div>
                 </div>
@@ -976,7 +998,7 @@ export default function ManageSessionInteractive({
                     const ihField = i === 2 ? 'co_host3_ih' : i === 3 ? 'co_host4_ih' : null;
                     return (
                       <div className="form-group" key={f}>
-                        <label>{i < 3 ? `Co-Host ${i + 1}` : 'Co-Host 4 / SV'}</label>
+                        <label className="assignment-label">{i < 3 ? `Co-Host ${i + 1}` : 'Co-Host 4 / SV'} <DuplicateWarning visible={duplicateFields.has(f)} label="Duplicate staff" /></label>
                         <StaffSelect name={f} staff={staff} authKey="cohost_auth" defaultValue={editing ? findPrimaryStaff(editing.staffRows, code) : ''} />
                         {ihField && hasInternal && (
                           <label className="ih-check">
@@ -1001,7 +1023,7 @@ export default function ManageSessionInteractive({
                     const code = ['AST_1', 'AST_2', 'AST_3', 'AST_4'][i];
                     return (
                       <div className="form-group" key={f}>
-                        <label>Assistant {i + 1}</label>
+                        <label className="assignment-label">Assistant {i + 1} <DuplicateWarning visible={duplicateFields.has(f)} label="Duplicate staff" /></label>
                         <StaffSelect name={f} staff={staff} authKey="asst_auth" defaultValue={editing ? findPrimaryStaff(editing.staffRows, code) : ''} />
                       </div>
                     );
@@ -1009,7 +1031,7 @@ export default function ManageSessionInteractive({
                 </div>
 
                 <div className="form-group">
-                  <label>Additional Staff</label>
+                  <label className="assignment-label">Additional Staff <DuplicateWarning visible={duplicateFields.has('additional_staff_name')} label="Duplicate staff" /></label>
                   {additionalStaffRows.map((row, i) => (
                     <div className="additional-staff-row" key={i}>
                       <input
@@ -1122,15 +1144,15 @@ export default function ManageSessionInteractive({
 
                       <div className="form-row">
                         <div className="form-group flex2">
-                          <label>Roblox Username</label>
+                          <label className="assignment-label">Roblox Username <DuplicateWarning visible={duplicateFields.has(`trainee_${n}_roblox`)} label="Duplicate trainee" /></label>
                           <input type="text" name={`trainee_${n}_roblox`} defaultValue={t?.trainee_roblox_username ?? ''} />
                         </div>
                         <div className="form-group flex2">
-                          <label>Discord Username</label>
+                          <label className="assignment-label">Discord Username <DuplicateWarning visible={duplicateFields.has(`trainee_${n}_discord`)} label="Duplicate trainee" /></label>
                           <input type="text" name={`trainee_${n}_discord`} defaultValue={t?.trainee_discord ?? ''} />
                         </div>
                         <div className="form-group">
-                          <label>Discord ID</label>
+                          <label className="assignment-label">Discord ID <DuplicateWarning visible={duplicateFields.has(`trainee_${n}_discord_id`)} label="Duplicate trainee" /></label>
                           <input type="text" name={`trainee_${n}_discord_id`} defaultValue={t?.trainee_discord_id ?? ''} />
                         </div>
                         <div className="form-group">
@@ -1174,7 +1196,7 @@ export default function ManageSessionInteractive({
 
                 <div className="modal-footer">
                   <button type="button" className="btn-ghost" onClick={() => setModalOpen(false)}>Cancel</button>
-                  <button type="submit" className="btn-primary">{editing ? 'Save Changes' : isRequestMode ? 'Submit Request' : 'Add Session'}</button>
+                  <button type="submit" className="btn-primary" disabled={duplicateFields.size > 0} title={duplicateFields.size > 0 ? 'Remove duplicate assignments before saving.' : undefined}>{editing ? 'Save Changes' : isRequestMode ? 'Submit Request' : 'Add Session'}</button>
                 </div>
               </form>
             
@@ -1191,7 +1213,7 @@ export default function ManageSessionInteractive({
               <button className="modal-close-btn" onClick={() => setDeleteTarget(null)}><FontAwesomeIcon icon={faTimes} /></button>
             </div>
             <p className="delete-msg">Are you sure you want to delete &quot;{deleteTarget.name}&quot;?</p>
-            <form action={deleteSession}>
+            <form action={handleDelete}>
               <input type="hidden" name="session_id" value={deleteTarget.id} />
               <div className="modal-footer">
                 <button type="button" className="btn-ghost" onClick={() => setDeleteTarget(null)}>Cancel</button>
@@ -1201,6 +1223,7 @@ export default function ManageSessionInteractive({
           </div>
         </div>
       )}
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </>
   );
 }

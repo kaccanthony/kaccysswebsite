@@ -23,6 +23,9 @@ export default async function SettingsPage({
   const user = await getCurrentUser(); // redirects to /login internally if not signed in
   const supabase = await createClient();
   const { profile, staffProfile, isStaff, prefs, displayName } = await fetchSettingsData(supabase, user.id);
+  const showStaffSettings = isStaff || (
+    user.isAdmin && ['owner', 'developer'].includes((user.adminRole ?? '').trim().toLowerCase())
+  );
 
   const savedValue = saved === 'profile' || saved === 'notifs' ? saved : null;
 
@@ -65,12 +68,13 @@ export default async function SettingsPage({
         }
         notifPanel={
           <NotificationPreferencesForm
-            isStaff={isStaff}
+            showStaffSettings={showStaffSettings}
             staffPrefs={{
               staff_session_reminder: prefs.staff_session_reminder,
               staff_reminder_time: prefs.staff_reminder_time,
               staff_trainee_sound: prefs.staff_trainee_sound,
               staff_trainee_warning: prefs.staff_trainee_warning,
+              staff_trainee_warning_time: prefs.staff_trainee_warning_time,
               staff_announcement_enabled: prefs.staff_announcement_enabled,
               staff_announcement_display: prefs.staff_announcement_display,
             }}

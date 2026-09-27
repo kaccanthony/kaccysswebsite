@@ -46,8 +46,6 @@
 .ovrBtn.on { background: rgba(255,107,107,.12); border-color: rgba(255,107,107,.4); color: #ffb3b3; }
 .ovrBtn.dangerous { border-color: rgba(255,107,107,.35); }
 .ovrBtn.dangerous.on { background: rgba(255,107,107,.22); border-color: #ff6b6b; color: #fff; }
-.ovrBtn.binaryControl.allowed { background: rgba(74,222,128,.14); border-color: rgba(74,222,128,.55); color: #72e99a; }
-.ovrBtn.binaryControl.denied { background: rgba(255,75,84,.14); border-color: rgba(255,75,84,.55); color: #ff858b; }
 .hostOnly { }
 
 .lockTagLocked, .lockTagUnlocked { font-size: .62rem; padding: 3px 9px; border-radius: 20px; display: flex; align-items: center; gap: 5px; margin-left: auto; }
@@ -126,10 +124,12 @@ select.cellInput option, select.cellInput optgroup { background: #18191c; color:
 .timerDisplay { font-family: 'JetBrains Mono', monospace; font-size: .82rem; font-variant-numeric: tabular-nums; min-width: 42px; color: rgba(255,255,255,.55); }
 .timerDisplay.running { color: #4ade80; }
 .timerDisplay.low { color: #f5a524; }
-.timerDisplay.expired { color: #ff6b6b; animation: timerBlink 1s step-start infinite; }
+.timerDisplay.expired { color: rgba(255,255,255,.55); }
+.timerDisplay.expiredFlash { color: #ff6b6b; animation: timerBlink 1s step-start infinite; }
 @keyframes timerBlink { 50% { opacity: .35; } }
 .timerBtn { width: 24px; height: 24px; border-radius: 7px; border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.05); color: rgba(255,255,255,.7); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: .65rem; }
 .timerBtn:hover { background: rgba(255,255,255,.12); color: #fff; }
+.timerBtn:disabled { opacity: .35; cursor: not-allowed; }
 .timerBtn.active { background: rgba(74,222,128,.15); border-color: rgba(74,222,128,.4); color: #4ade80; }
 .timerBtn.recorded, .timerBtn.recorded:hover { background: rgba(74,222,128,.18); border-color: rgba(74,222,128,.52); color: #62df8b; cursor: default; opacity: 1; }
 
@@ -280,24 +280,6 @@ select.cellInput option, select.cellInput optgroup { background: #18191c; color:
 .scriptCopyBtn.copied { background: rgba(74,222,128,.15); border-color: rgba(74,222,128,.4); color: #4ade80; }
 .placeholderTag { color: #7cc4ff; background: rgba(124,196,255,.12); padding: 0 4px; border-radius: 4px; font-weight: 600; }
 
-.toastContainer { position: fixed; bottom: 20px; right: 20px; z-index: 700; display: flex; flex-direction: column-reverse; gap: 10px; pointer-events: none; }
-.toast { --toast-accent: #7cc4ff; position: relative; width: min(360px, calc(100vw - 28px)); overflow: hidden; pointer-events: auto; background: #151619; border: 1px solid color-mix(in srgb, var(--toast-accent) 42%, rgba(255,255,255,.14)); border-radius: 13px; padding: 13px 44px 16px 15px; box-shadow: 0 12px 32px rgba(0,0,0,.42); opacity: 0; transform: translateX(calc(100% + 28px)); }
-.toast.success { --toast-accent: #4ade80; }
-.toast.warning { --toast-accent: #f5b942; }
-.toast.error { --toast-accent: #ff656d; }
-.toast.info { --toast-accent: #7cc4ff; }
-.toast.show { animation: toastSlideIn .28s cubic-bezier(.2,.8,.2,1) forwards, toastSlideOut .28s ease 9.72s forwards; }
-.toastMsg { display: flex; align-items: flex-start; gap: 10px; font-size: .8rem; line-height: 1.4; color: rgba(255,255,255,.9); }
-.toastMsg svg { flex: 0 0 auto; margin-top: 2px; color: var(--toast-accent); }
-.toastText { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
-.toastActor { color: var(--toast-accent); font-size: .69rem; font-weight: 700; letter-spacing: .025em; }
-.toastDismiss { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 8px; background: transparent; color: rgba(255,255,255,.55); cursor: pointer; }
-.toastDismiss:hover { background: rgba(255,255,255,.09); color: #fff; }
-.toastDismiss:focus-visible { outline: 2px solid var(--toast-accent); outline-offset: 1px; }
-.toastTimer { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; transform-origin: left; background: var(--toast-accent); animation: toastCountdown 10s linear forwards; }
-@keyframes toastSlideIn { to { opacity: 1; transform: translateX(0); } }
-@keyframes toastSlideOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(calc(100% + 28px)); } }
-@keyframes toastCountdown { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 
 .modalOverlay { position: fixed; top: 64px; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.78); z-index: 300; align-items: center; justify-content: center; padding: 24px; }
 .modal { width: 96vw; max-width: 1000px; max-height: 88vh; overflow-y: auto; background: #121214; border: 1px solid rgba(255,255,255,.18); border-radius: 18px; box-shadow: 0 24px 70px rgba(0,0,0,.7); }
@@ -397,8 +379,6 @@ select.cellInput option, select.cellInput optgroup { background: #18191c; color:
   .modalFooter > button { width: 100%; min-height: 44px; }
   .announceFullscreenBox { margin: 14px; padding: 28px 20px; }
 
-  .toastContainer { right: 12px; bottom: 78px; left: 12px; }
-  .toast { width: auto; }
 }
 
 @media (pointer: coarse) {
@@ -416,9 +396,8 @@ select.cellInput option, select.cellInput optgroup { background: #18191c; color:
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .globalTimerOvertime, .timerDisplay.expired, .bellFabDot.show, .bellBtn.awaitingAck svg, .toast.show, .toastTimer { animation: none; }
+  .globalTimerOvertime, .timerDisplay.expiredFlash, .bellFabDot.show, .bellBtn.awaitingAck svg { animation: none; }
   .globalTimerOvertime { color: #ff4d58; text-shadow: 0 0 12px rgba(255,70,80,.4); }
-  .toast.show { opacity: 1; transform: none; }
   .ovrBtn { transition: none; }
 }
 .standbySlot {

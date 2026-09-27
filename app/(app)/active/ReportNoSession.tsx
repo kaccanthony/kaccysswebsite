@@ -4,14 +4,14 @@
 // client component reports "no active session" up on mount when needed.
 
 import { useEffect } from 'react';
-import { useLiveSession } from '../LiveSessionContext';
+import { useLiveSessionActions } from '../LiveSessionContext';
 
 export default function ReportNoSession() {
-  const { reportInactive } = useLiveSession();
+  const { reportInactive } = useLiveSessionActions();
 
   useEffect(() => {
     reportInactive();
-  }, []);
+  }, [reportInactive]);
 
   return null;
 }

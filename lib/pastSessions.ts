@@ -65,7 +65,7 @@ export async function getPastSessions(): Promise<PastSession[]> {
   const staffBySession = new Map((staffLogs ?? []).map((s) => [s.session_id, s]));
 
   // trainer_id is bigint (Discord snowflake) — profiles.discord_id is text, so cast to match.
-  const trainerIds = Array.from(new Set((trainees ?? []).map((t) => String(t.trainer_id)).filter(Boolean)));
+  const trainerIds = Array.from(new Set((trainees ?? []).map((t) => t.trainer_id == null ? null : String(t.trainer_id)).filter((id): id is string => !!id)));
   const trainerNames = new Map<string, string>();
   if (trainerIds.length > 0) {
     const { data: profileRows } = await supabase.from('profiles').select('discord_id, discord_username').in('discord_id', trainerIds);
@@ -77,9 +77,9 @@ export async function getPastSessions(): Promise<PastSession[]> {
   const traineesBySession = new Map<number, PastTrainee[]>();
   for (const t of trainees ?? []) {
     const list = traineesBySession.get(t.session_id) ?? [];
-    const trainerKey = String(t.trainer_id);
+    const trainerKey = t.trainer_id == null ? '' : String(t.trainer_id);
     list.push({
-      name: t.trainee_roblox,
+      name: t.trainee_roblox || 'Unknown trainee',
       zone: String(t.trainee_zone ?? ''),
       trainer: trainerNames.get(trainerKey) || trainerKey || '—',
     });

@@ -40,5 +40,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# Local-only project documentation; keep out of commits and deployments
+/docu/
+
 .claude
 CLAUDE.md

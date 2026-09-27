@@ -5,6 +5,7 @@
 import { useEffect, useRef } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import type { BellStateRow } from '@/types/session';
+import { SESSION_BELL_COLUMNS } from '@/lib/supabase/columns';
 
 export function useBellRealtime(sessionId: number, onChange: (row: BellStateRow) => void) {
   const handlerRef = useRef(onChange);
@@ -16,7 +17,7 @@ export function useBellRealtime(sessionId: number, onChange: (row: BellStateRow)
     // Prime with the current row on mount (channel only pushes future changes).
     supabase
       .from('session_bell_state')
-      .select('*')
+      .select(SESSION_BELL_COLUMNS)
       .eq('session_id', sessionId)
       .maybeSingle()
       .then(({ data }) => { if (data) handlerRef.current(data as BellStateRow); });

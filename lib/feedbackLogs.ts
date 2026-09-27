@@ -6,8 +6,8 @@ export interface FeedbackLog {
   log_id: number;
   session_id: number;
   session_label: string; // "#123 — Session Name", resolved across whichever session table still has it
-  trainee_id: string; // kept as string — bigint Discord snowflakes exceed JS's safe integer range
-  trainee_name: string; // resolved discord_username where possible, else the raw id
+  trainee_id: string; // empty when no Discord ID was supplied; snowflakes stay strings
+  trainee_name: string; // resolved name, archived name, or raw id
   trainer_id: string | null;
   trainer_name: string | null;
   created_at: string;
@@ -26,7 +26,7 @@ export interface SessionTraineeOption {
   session_id: number;
   session_label: string;
   trainee_id: string;
-  trainee_label: string; // Roblox name — session_full_logs has no direct FK to profiles for trainees
+  trainee_label: string; // archived Roblox/Discord name, falling back to the ID
 }
 
 async function resolveSessionLabels(supabase: SupabaseClient, sessionIds: number[]): Promise<Map<number, string>> {
@@ -56,7 +56,9 @@ async function resolveSessionLabels(supabase: SupabaseClient, sessionIds: number
 export async function getFeedbackLogs(): Promise<FeedbackLog[]> {
   const supabase = await createClient();
 
-  const { data: logs, error } = await supabase.from('session_feedback_logs').select('*').order('updated_at', { ascending: false });
+  const { data: logs, error } = await supabase.from('session_feedback_logs')
+    .select('log_id, session_id, trainee_id, trainer_id, created_at, updated_at, trains, setup, conflict, priority, rbtiming, overall, notes, setup_seconds')
+    .order('updated_at', { ascending: false });
 
   if (error) throw error;
   if (!logs || logs.length === 0) return [];
@@ -67,7 +69,7 @@ export async function getFeedbackLogs(): Promise<FeedbackLog[]> {
   const discordIds = Array.from(
     new Set(
       logs
-        .flatMap((l) => [String(l.trainee_id), l.trainer_id != null ? String(l.trainer_id) : null])
+        .flatMap((l) => [l.trainee_id != null ? String(l.trainee_id) : null, l.trainer_id != null ? String(l.trainer_id) : null])
         .filter((v): v is string => !!v)
     )
   );
@@ -79,15 +81,15 @@ export async function getFeedbackLogs(): Promise<FeedbackLog[]> {
     }
   }
 
-  return logs.map((row: Record<string, any>): FeedbackLog => {
-    const traineeKey = String(row.trainee_id);
+  return logs.map((row): FeedbackLog => {
+    const traineeKey = row.trainee_id != null ? String(row.trainee_id) : '';
     const trainerKey = row.trainer_id != null ? String(row.trainer_id) : null;
     return {
       log_id: row.log_id,
       session_id: row.session_id,
       session_label: sessionLabels.get(row.session_id) ?? `#${row.session_id}`,
       trainee_id: traineeKey,
-      trainee_name: nameByDiscordId.get(traineeKey) ?? traineeKey,
+      trainee_name: nameByDiscordId.get(traineeKey) ?? (traineeKey || 'Unknown trainee'),
       trainer_id: trainerKey,
       trainer_name: trainerKey ? nameByDiscordId.get(trainerKey) ?? trainerKey : null,
       created_at: row.created_at,
@@ -121,13 +123,15 @@ export async function getSessionTraineeOptions(): Promise<SessionTraineeOption[]
   if (error) throw error;
   if (!attended || attended.length === 0) return [];
 
-  const sessionIds = Array.from(new Set(attended.map((a) => a.session_id)));
+  const withIds = attended.filter((row) => row.trainee_id != null);
+  if (withIds.length === 0) return [];
+  const sessionIds = Array.from(new Set(withIds.map((a) => a.session_id)));
   const sessionLabels = await resolveSessionLabels(supabase, sessionIds);
 
-  return attended.map((row) => ({
+  return withIds.map((row) => ({
     session_id: row.session_id,
     session_label: sessionLabels.get(row.session_id) ?? `#${row.session_id}`,
     trainee_id: String(row.trainee_id),
-    trainee_label: row.trainee_roblox,
+    trainee_label: row.trainee_roblox || String(row.trainee_id),
   }));
 }

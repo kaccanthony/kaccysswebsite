@@ -9,8 +9,10 @@ import { getCurrentUser } from '@/lib/getCurrentUser';
 import { formatRoleDisplay } from '@/lib/roles';
 import { isInternalHelperRole } from '@/lib/sessionStaffTrainees';
 import { getSiteTimezoneMode, siteWallTimeToISOString } from '@/lib/siteTimezone';
+import { mergePrefs, parseStaffTraineeWarningTimes } from '@/lib/settings';
 import SessionOngoingClient from './SessionOngoingClient';
 import type { LiveState, SessionOngoingRow, StaffShiftRow, ViewerRole } from '@/types/session';
+import { SESSION_ONGOING_COLUMNS } from '@/lib/supabase/columns';
 
 export default async function SessionOngoingPage({
   searchParams,
@@ -27,7 +29,7 @@ export default async function SessionOngoingPage({
 
   const { data: sessionRow } = await supabase
     .from('session_ongoing')
-    .select('*')
+    .select(SESSION_ONGOING_COLUMNS)
     .eq('session_id', sessionId)
     .single();
   if (!sessionRow) redirect('/setupsesh');
@@ -48,10 +50,6 @@ export default async function SessionOngoingPage({
   // profiles only permits users to select their own row. This server-only,
   // field-limited directory query therefore uses the service role after the
   // page has authenticated the viewer above.
-  const { data: staffDirectoryRows } = await admin
-    .from('staff_profiles')
-    .select('id, staff_rank, profiles!inner(discord_username, discord_id)');
-
   // session_ongoing has NO host/co_host1-4/assistant_1-4 columns — those live
   // as rows in session_staff (role + staff_name), see db.txt. Pull this
   // session's assignments from there instead of the old flat-column read.
@@ -62,12 +60,15 @@ export default async function SessionOngoingPage({
   // previous version of this query) always returned zero rows, which is why the
   // host dropdown showed None and why every viewer fell through to the default
   // 'Assistant' role regardless of who they actually were on the session.
-  const { data: staffRows } = await supabase
-    .from('session_staff')
-    .select('staff_row_id, role, staff_name, attended, notes')
-    .eq('session_id', sessionId);
-
-  const [{ data: traineeRows }, { data: driverRows }] = await Promise.all([
+  const [
+    { data: staffDirectoryRows },
+    { data: staffRows },
+    { data: traineeRows },
+    { data: driverRows },
+    { data: viewerProfile },
+  ] = await Promise.all([
+    admin.from('staff_profiles').select('id, staff_rank, profiles!inner(discord_username, discord_id)'),
+    supabase.from('session_staff').select('staff_row_id, role, staff_name, attended, notes').eq('session_id', sessionId),
     supabase
       .from('session_trainees')
       .select('trainee_row_id, slot_number, is_standby, trainee_roblox_username, trainee_discord, trainee_discord_id, zone, note, trainer_name, attended')
@@ -78,7 +79,17 @@ export default async function SessionOngoingPage({
       .select('driver_row_id, discord_username, roblox_username, attended')
       .eq('session_id', sessionId)
       .order('driver_row_id', { ascending: true }),
+    supabase.from('profiles').select('notif_prefs').eq('id', user.id).maybeSingle(),
   ]);
+
+  const viewerNotifPrefs = mergePrefs(viewerProfile?.notif_prefs as Record<string, string> | null);
+  const prefTraineeWarning = viewerNotifPrefs.staff_trainee_warning !== '0';
+  const prefTraineeWarningTimes = parseStaffTraineeWarningTimes(viewerNotifPrefs.staff_trainee_warning_time);
+  const prefTraineeSound = viewerNotifPrefs.staff_trainee_sound !== '0';
+  const prefAnnouncementDisplay = ['toast', 'banner', 'fullscreen'].includes(viewerNotifPrefs.staff_announcement_display)
+    ? viewerNotifPrefs.staff_announcement_display as 'toast' | 'banner' | 'fullscreen'
+    : 'toast';
+  const prefAnnouncementEnabled = viewerNotifPrefs.staff_announcement_enabled !== '0';
 
   function findRole(code: string): string | null {
     return (staffRows ?? []).find((r) => r.role === code || r.role.startsWith(`${code},`))?.staff_name ?? null;
@@ -281,12 +292,11 @@ export default async function SessionOngoingPage({
       roleDisplay={formatRoleDisplay(user.effectiveRole, user.effectivePermLevel)}
       avatarUrl={user.avatarUrl}
       staffId={user.id}
-      // Per-staff notification prefs (staff_trainee_warning, staff_announcement_display,
-      // staff_announcement_enabled) -> pull from profiles.notif_prefs jsonb (see db.txt)
-      // instead of the old user_staff_notif_prefs table; wire up here once that column's read.
-      prefTraineeWarning
-      prefAnnouncementDisplay="toast"
-      prefAnnouncementEnabled
+      prefTraineeWarning={prefTraineeWarning}
+      prefTraineeWarningTimes={prefTraineeWarningTimes}
+      prefTraineeSound={prefTraineeSound}
+      prefAnnouncementDisplay={prefAnnouncementDisplay}
+      prefAnnouncementEnabled={prefAnnouncementEnabled}
     />
   );
 }

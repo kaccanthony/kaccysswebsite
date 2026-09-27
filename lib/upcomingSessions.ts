@@ -1,5 +1,6 @@
 // FILE: lib/upcomingSessions.ts
 import { createClient } from '@/utils/supabase/server';
+import { SESSION_UPCOMING_COLUMNS } from '@/lib/supabase/columns';
 import {
   currentSiteTimeParts,
   getSiteTimezoneMode,
@@ -136,7 +137,7 @@ export async function getUpcomingSessions(): Promise<UpcomingSession[]> {
 
   const { data: sessions, error } = await supabase
     .from('session_upcoming')
-    .select('*')
+    .select(SESSION_UPCOMING_COLUMNS)
     .or(`session_date.gt.${todayBST},and(session_date.eq.${todayBST},session_time.gte.${nowTimeBST})`)
     .order('session_date', { ascending: true })
     .order('session_time', { ascending: true });

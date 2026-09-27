@@ -33,8 +33,9 @@ export interface CurrentUser {
   effectiveAuths: ViewAsAuthFlags;
   effectiveIsStaff: boolean;
   effectiveIsAdmin: boolean;
-  // Real username unless a 'person' mode View As session is active, in which case
-  // this becomes the impersonated staff member's discord_username. 'rank' mode
+  // Real display identity (server nickname, falling back to Discord username) unless
+  // a 'person' mode View As session is active, in which case this becomes the
+  // impersonated staff member's label. 'rank' mode
   // sessions have no personLabel, so this correctly falls back to the real name —
   // rank-only simulation was never meant to change *whose* sessions/data show up,
   // only what card-visibility tier is being previewed.
@@ -56,7 +57,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser> => {
   const [{ data: profile }, { data: staffProfile }, { data: adminRow }] = await Promise.all([
     supabase
       .from('profiles')
-      .select('discord_username, discord_avatar_url, roblox_username, roblox_avatar_url')
+      .select('discord_username, discord_server_name, discord_avatar_url, roblox_username, roblox_avatar_url')
       .eq('id', authUser.id)
       .single(),
     supabase.from('staff_profiles')
@@ -75,6 +76,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser> => {
   const isAdmin = !!adminRow;
   const rawRole = staffProfile?.staff_rank ?? '';
   const permLevel = staffProfile?.staff_perm_level ?? (isAdmin ? 20 : 0);
+  const realUsername = profile?.discord_server_name || profile?.discord_username || authUser.user_metadata?.user_name || 'Member';
 
   if (isStaff && !rawRole) {
     redirect('/login?error=no_role_assigned');
@@ -104,7 +106,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser> => {
 
   return {
     id: authUser.id,
-    username: profile?.discord_username || authUser.user_metadata?.user_name || 'Member',
+    username: realUsername,
     avatarUrl: profile?.discord_avatar_url ?? null,
     robloxUsername: profile?.roblox_username ?? null,
     robloxAvatarUrl: profile?.roblox_avatar_url ?? null,
@@ -119,6 +121,6 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser> => {
     effectiveAuths: viewingAs?.auths ?? realAuths,
     effectiveIsStaff: viewingAs ? viewingAs.permLevel > 0 : isStaff,
     effectiveIsAdmin: viewingAs ? false : isAdmin,
-    effectiveUsername: viewingAs?.personLabel ?? (profile?.discord_username || authUser.user_metadata?.user_name || 'Member'),
+    effectiveUsername: viewingAs?.personLabel ?? realUsername,
   };
 });

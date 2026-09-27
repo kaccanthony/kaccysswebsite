@@ -1,6 +1,6 @@
 /* FILE: app/settings/settings.css */
 /* ── Main ── */
-.settings-page { position: relative; z-index: 1; max-width: 860px; margin: 0 auto; padding: 0px 24px 60px; }
+.settings-page { position: relative; z-index: 1; width: 100%; max-width: 860px; margin: 0 auto; padding: 0 16px 60px; }
 
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .section-label { font-family: 'Libre Baskerville', serif; font-size: 1.4rem; font-weight: 600; color: #fff; letter-spacing: .01em; }
@@ -83,6 +83,17 @@
 .inline-select { padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.07); color: #fff; font-size: .80rem; font-family: 'Inter', sans-serif; outline: none; cursor: pointer; transition: border-color .2s, opacity .2s; }
 .inline-select option { background: #1a1a1a; }
 .inline-select.disabled { opacity: .35; pointer-events: none; }
+.warning-time-select { position: relative; flex: 0 0 200px; width: 200px; max-width: 100%; }
+.warning-time-trigger { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid rgba(255,255,255,.14); border-radius: 8px; background: rgba(255,255,255,.05); color: rgba(255,255,255,.8); font: inherit; font-size: .75rem; text-align: left; cursor: pointer; }
+.warning-time-trigger span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.warning-time-trigger:disabled { opacity: .4; cursor: not-allowed; }
+.warning-time-menu { position: absolute; z-index: 20; top: calc(100% + 5px); right: 0; width: 100%; padding: 7px; border: 1px solid rgba(255,255,255,.14); border-radius: 9px; background: #20232b; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+.warning-time-search { width: 100%; margin-bottom: 5px; padding: 7px 8px; border: 1px solid rgba(255,255,255,.12); border-radius: 6px; background: rgba(0,0,0,.2); color: white; font: inherit; font-size: .75rem; }
+.warning-time-option { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px; border: 0; border-radius: 5px; background: transparent; color: rgba(255,255,255,.8); font: inherit; font-size: .75rem; text-align: left; cursor: pointer; }
+.warning-time-option:hover, .warning-time-option[aria-selected="true"] { background: rgba(255,255,255,.08); }
+.warning-time-check { display: grid; width: 15px; height: 15px; place-items: center; border: 1px solid rgba(255,255,255,.35); border-radius: 4px; font-size: .65rem; }
+.warning-time-check.selected { border-color: #80ffb0; background: #80ffb0; color: #152019; }
+.warning-time-empty { padding: 8px; color: rgba(255,255,255,.55); font-size: .75rem; }
 
 /* ── Toggle ── */
 .toggle-wrap { display: inline-flex; align-items: center; cursor: pointer; }
@@ -147,4 +158,29 @@
 
 @media (max-width: 640px) {
     .main { padding: 84px 16px 32px; }
+    .settings-page { padding: 0 4px 40px; }
+    .settings-section { padding: 16px 12px; border-radius: 13px; }
+    .page-header { align-items: flex-start; }
+    .section-label { font-size: 1.2rem; }
+    .tab-bar { width: 100%; gap: 4px; }
+    .tab-btn { flex: 1 1 auto; justify-content: center; padding: 8px 10px; }
+    .notif-card { align-items: flex-start; flex-direction: column; gap: 12px; padding: 14px 12px; }
+    .notif-card-left { width: 100%; gap: 10px; }
+    .notif-card-right { width: 100%; justify-content: space-between; }
+    .notif-card-right > .toggle-wrap { margin-left: auto; }
+    .warning-notif-card .notif-card-right { align-items: center; gap: 10px; }
+    .warning-time-select { flex: 0 1 200px; width: 200px; }
+    .inline-control { min-width: 0; }
+    .inline-select { max-width: 100%; }
+    .form-grid { grid-template-columns: 1fr; }
+    .form-actions { justify-content: stretch; }
+    .btn-save { justify-content: center; width: 100%; }
+}
+
+@media (max-width: 380px) {
+    .settings-page { padding-right: 0; padding-left: 0; }
+    .settings-section { padding-right: 10px; padding-left: 10px; }
+    .notif-icon-wrap { width: 34px; height: 34px; }
+    .warning-time-select { flex-basis: 0; flex-grow: 1; min-width: 0; }
+    .toggle-track { width: 40px; }
 }

@@ -18,7 +18,8 @@ import { ICONS, type IconKey } from '@/lib/icons';
 import { useSessionRealtime } from '@/lib/supabase/useSessionRealtime';
 import { useBellRealtime } from '@/lib/supabase/useBellRealtime';
 import { useAnnouncementBroadcast } from '@/lib/supabase/useAnnouncementBroadcast';
-import { useLiveSession } from '../LiveSessionContext';
+import ToastStack, { type ToastEntry, type ToastKind } from '@/components/ToastStack';
+import { useLiveSessionActions } from '../LiveSessionContext';
 import { ZONE_DATA, ZONES, ANNOUNCEMENT_TEMPLATE, SCRIPT_LINES, STATION_LIST, buildStationAnnouncement, STAFF_ROLES, buildReportText } from '@/lib/session/constants';
 import type {
   SessionOngoingRow, LiveState, TimerState, DriverRow, StaffShiftRow, FeedbackDataMap,
@@ -200,14 +201,6 @@ function ScriptPreview({
   );
 }
 
-type ToastKind = 'success' | 'warning' | 'error' | 'info';
-interface ToastEntry {
-  id: number;
-  message: string;
-  kind: ToastKind;
-  actorName: string;
-}
-
 const OVERRIDE_LABELS: Record<keyof OverridesState, string> = {
   'session-details': 'Override Session Details',
   trainees: 'Override Trainees',
@@ -258,24 +251,59 @@ function SessionElapsedClock({
 function LiveTimerText({
   timer,
   fallbackSeconds,
+  warningSeconds = [],
+  onWarning,
   onExpired,
   large = false,
 }: {
   timer: TimerState | undefined;
   fallbackSeconds: number;
+  warningSeconds?: number[];
+  onWarning?: (seconds: number) => void;
   onExpired?: () => void;
   large?: boolean;
 }) {
   const [remaining, setRemaining] = useState(() => timer ? computeCurrentRemaining(timer) : fallbackSeconds);
+  const [flashExpiresAt, setFlashExpiresAt] = useState<number | null>(null);
   const notifiedSyncRef = useRef<number | null>(null);
+  const previousRemainingRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const update = () => setRemaining(timer ? computeCurrentRemaining(timer) : fallbackSeconds);
+    const update = () => {
+      const nextRemaining = timer ? computeCurrentRemaining(timer) : fallbackSeconds;
+      setRemaining(nextRemaining);
+      if (nextRemaining > 0) {
+        setFlashExpiresAt(null);
+      } else if (timer?.running) {
+        const flashUntil = timer.syncedAt + timer.remainingSeconds * 1000 + 10_000;
+        setFlashExpiresAt(flashUntil > Date.now() ? flashUntil : null);
+      }
+    };
     update();
     if (!timer?.running) return;
     const id = window.setInterval(update, 1000);
     return () => window.clearInterval(id);
   }, [timer, fallbackSeconds]);
+
+  useEffect(() => {
+    if (flashExpiresAt === null) return;
+    const delay = flashExpiresAt - Date.now();
+    if (delay <= 0) return;
+    const timeout = window.setTimeout(() => setFlashExpiresAt(null), delay);
+    return () => window.clearTimeout(timeout);
+  }, [flashExpiresAt]);
+
+  useEffect(() => {
+    if (remaining > 0 && timer?.running) {
+      const previousRemaining = previousRemainingRef.current;
+      if (previousRemaining !== null && remaining < previousRemaining) {
+        for (const seconds of warningSeconds) {
+          if (previousRemaining > seconds && remaining <= seconds) onWarning?.(seconds);
+        }
+      }
+    }
+    previousRemainingRef.current = remaining;
+  }, [remaining, timer?.running, warningSeconds, onWarning]);
 
   useEffect(() => {
     if (remaining > 0) notifiedSyncRef.current = null;
@@ -286,7 +314,7 @@ function LiveTimerText({
 
   return (
     <span
-      className={`${styles.timerDisplay} ${timer?.running && remaining > 60 ? styles.running : remaining <= 0 ? styles.expired : remaining <= 60 ? styles.low : ''}`}
+      className={`${styles.timerDisplay} ${timer?.running && remaining > 60 ? styles.running : remaining <= 0 ? (flashExpiresAt !== null ? styles.expiredFlash : styles.expired) : remaining <= 60 ? styles.low : ''}`}
       style={large ? { fontSize: '2rem' } : undefined}
     >
       {fmt(remaining)}
@@ -297,7 +325,7 @@ function LiveTimerText({
 const DEFAULT_OVERRIDES: OverridesState = {
   'session-details': false, trainees: false, 'staff-roles': false, 'drivers-disable': false,
   'slot-order': false, 'staff-delete': false, 'trainee-details': false, 'trainer-details': false,
-  'staff-addition': true, 'allow-all': false,
+  'staff-addition': false, 'allow-all': false,
 };
 
 interface Props {
@@ -320,6 +348,8 @@ interface Props {
   avatarUrl: string | null;
   staffId: string;
   prefTraineeWarning: boolean;
+  prefTraineeWarningTimes: number[];
+  prefTraineeSound: boolean;
   prefAnnouncementDisplay: 'toast' | 'banner' | 'fullscreen';
   prefAnnouncementEnabled: boolean;
 }
@@ -327,7 +357,7 @@ interface Props {
 export default function SessionOngoingClient(props: Props) {
   const {
     initialSession, staffDirectory, eligibleStaff, eligibleHosts, scheduledStartIso, standbySlots, timezoneMode, viewerRole, myDisplayName,
-    prefTraineeWarning, prefAnnouncementDisplay, prefAnnouncementEnabled,
+    prefTraineeWarning, prefTraineeWarningTimes, prefTraineeSound, prefAnnouncementDisplay, prefAnnouncementEnabled,
   } = props;
   const hostOptions = eligibleHosts ?? Object.keys(staffDirectory);
 
@@ -420,7 +450,7 @@ export default function SessionOngoingClient(props: Props) {
     const id = window.setTimeout(() => setBellNow(Date.now()), Math.max(50, Math.min(...deadlines) - now + 50));
     return () => window.clearTimeout(id);
   }, [bell, bellLocalCooldownUntil, bellNow]);
-  const { reportActive } = useLiveSession();
+  const { reportActive } = useLiveSessionActions();
   useEffect(() => {
     const persistedChange = initialSession.last_updated ?? initialSession.started_at;
     const changedAt = persistedChange ? new Date(persistedChange).getTime() : undefined;
@@ -439,6 +469,7 @@ export default function SessionOngoingClient(props: Props) {
   const changeVersionRef = useRef(0);
   const savePromiseRef = useRef<Promise<boolean> | null>(null);
   const lastSyncErrorRef = useRef<{ message: string; at: number } | null>(null);
+  const consecutiveSyncFailuresRef = useRef(0);
   const queueSync = useCallback((field?: keyof LiveState) => {
     if (field) dirtyRef.current.liveFields.add(field);
     changeVersionRef.current += 1;
@@ -645,6 +676,8 @@ export default function SessionOngoingClient(props: Props) {
   });
 
   const announcementSoundRef = useRef<HTMLAudioElement>(null);
+  const traineeWarningSoundRef = useRef<HTMLAudioElement>(null);
+  const traineeOverSoundRef = useRef<HTMLAudioElement>(null);
   const { send: sendAnnouncementRaw } = useAnnouncementBroadcast(sessionId, (a: AnnouncementPayload) => {
     reportActive(true);
     if (!prefAnnouncementEnabled) return;
@@ -677,6 +710,7 @@ export default function SessionOngoingClient(props: Props) {
 
   // ── debounced push (replaces pushState / queueLiveStateSync) ──
   const pushState = useCallback(async (keepalive = false): Promise<boolean> => {
+    if (consecutiveSyncFailuresRef.current >= 5) return false;
     if (savePromiseRef.current) return savePromiseRef.current;
     const d = dirtyRef.current;
     const hasChanges = d.liveFields.size > 0 || d.status || d.details || d.attendance || d.traineeRows.size > 0;
@@ -767,13 +801,18 @@ export default function SessionOngoingClient(props: Props) {
           };
         }
         lastSyncErrorRef.current = null;
+        consecutiveSyncFailuresRef.current = 0;
         return true;
       } catch (error) {
+        consecutiveSyncFailuresRef.current += 1;
         const message = error instanceof Error ? error.message : 'Unknown save error.';
         const previous = lastSyncErrorRef.current;
         if (!previous || previous.message !== message || Date.now() - previous.at > 10_000) {
           showToast(`Changes were not saved: ${message}`);
           lastSyncErrorRef.current = { message, at: Date.now() };
+        }
+        if (consecutiveSyncFailuresRef.current === 5) {
+          showToast('Saving paused after 5 consecutive failures to protect the database. Reload the page before trying again.', 'error');
         }
         return false;
       }
@@ -855,7 +894,7 @@ export default function SessionOngoingClient(props: Props) {
   ), [staffShift, myDisplayName]);
   const canSeeTimeTracker = isHost || isMainAst || isInternalHelper;
   const canSeeMainAstNotes = isHost || isMainAst || isInternalHelper;
-  const canAddStaff = overrides['staff-addition'] && (isHost || isMainAst);
+  const canAddStaff = allowAll || (overrides['staff-addition'] && (isHost || isMainAst));
   const trainerOptions = useMemo(() => {
     const seen = new Set<string>();
     return [
@@ -890,7 +929,40 @@ export default function SessionOngoingClient(props: Props) {
   const statusUnlocked = allowAll || overrides['session-details'] || allDone || isHost;
 
   // ── trainee timer controls (replace toggleTimer/resetTimer/setTimerValue/recordSetupDone) ──
+  const warnedTimerThresholdsRef = useRef(new Set<string>());
+  const playTraineeWarning = useCallback((row: string, timerSyncAt: number, seconds: number) => {
+    if (!prefTraineeWarning) return;
+    const key = `${row}:${timerSyncAt}:${seconds}`;
+    if (warnedTimerThresholdsRef.current.has(key)) return;
+    warnedTimerThresholdsRef.current.add(key);
+    const sound = traineeWarningSoundRef.current;
+    if (sound) {
+      sound.currentTime = 0;
+      void sound.play().catch(() => {});
+    }
+    showToast(`${traineeLabel(row)} has ${fmt(seconds)} remaining.`, 'warning');
+  }, [prefTraineeWarning, showToast, traineeLabel]);
+
+  const expiredTimerRowsRef = useRef(new Map<string, number>());
+  const expireTimer = useCallback((row: string) => {
+    const timer = timers[row];
+    if (!timer?.running || computeCurrentRemaining(timer) > 0 || expiredTimerRowsRef.current.get(row) === timer.syncedAt) return;
+    expiredTimerRowsRef.current.set(row, timer.syncedAt);
+    setTimers((prev) => ({
+      ...prev,
+      [row]: { ...timer, remainingSeconds: 0, running: false, syncedAt: Date.now() },
+    }));
+    queueSync('timers');
+    if (prefTraineeSound && traineeOverSoundRef.current) {
+      traineeOverSoundRef.current.currentTime = 0;
+      void traineeOverSoundRef.current.play().catch(() => {});
+    }
+    showToast(`Time is over for ${traineeLabel(row)}.`, 'warning');
+  }, [prefTraineeSound, queueSync, showToast, timers, traineeLabel]);
+
   const toggleTimer = useCallback((row: string) => {
+    const currentTimer = timers[row];
+    if (currentTimer && computeCurrentRemaining(currentTimer) <= 0) return;
     const wasRunning = timers[row]?.running ?? false;
     setTimers((prev) => {
       const t = prev[row] ?? { remainingSeconds: (session.trainee_timer || 12) * 60, running: false, syncedAt: Date.now() };
@@ -902,6 +974,7 @@ export default function SessionOngoingClient(props: Props) {
   }, [queueSync, session.trainee_timer, showToast, timers, traineeLabel]);
 
   const resetTimer = useCallback((row: string, totalSeconds: number) => {
+    expiredTimerRowsRef.current.delete(row);
     setTimers((prev) => ({ ...prev, [row]: { remainingSeconds: totalSeconds, running: false, syncedAt: Date.now(), setupSeconds: prev[row]?.setupSeconds } }));
     queueSync('timers');
     showToast(`Timer reset for ${traineeLabel(row)}.`, 'success');
@@ -909,12 +982,14 @@ export default function SessionOngoingClient(props: Props) {
 
   const setTimerValue = useCallback((row: string, mmss: string) => {
     const parts = mmss.split(':').map((n) => parseInt(n, 10) || 0);
-    const remainingSeconds = parts.length === 2 ? parts[0] * 60 + parts[1] : parseInt(mmss, 10) || 0;
+    const remainingSeconds = Math.max(0, parts.length === 2 ? parts[0] * 60 + parts[1] : parseInt(mmss, 10) || 0);
+    if (remainingSeconds > 0) expiredTimerRowsRef.current.delete(row);
     setTimers((prev) => ({
       ...prev,
       [row]: {
         ...(prev[row] ?? { remainingSeconds, running: false, syncedAt: Date.now() }),
         remainingSeconds,
+        running: remainingSeconds > 0 ? (prev[row]?.running ?? false) : false,
         syncedAt: Date.now(),
       },
     }));
@@ -1276,15 +1351,19 @@ Thank you for attending.`;
   const concludeUnlocked = isHost && (statusValue === 'cancelled' || statusValue === 'concluded');
 
   // ── announcement resolve (per-trainee zone template, replaces resolveAnnouncement) ──
-  const resolveAnnouncement = useCallback((row: string, traineeName: string, trainerName: string, zone: string) => {
+  const resolveAnnouncement = useCallback((traineeDiscordId: string, trainerDiscordId: string, zone: string) => {
     const info = zone ? ZONE_DATA[zone] : null;
+    const mention = (discordId: string, fallback: string) => {
+      const id = discordId.trim();
+      return /^\d+$/.test(id) ? `<@${id}>` : `[${fallback}]`;
+    };
     return ANNOUNCEMENT_TEMPLATE
       .replaceAll('[ZONE COVERAGE]', info?.coverage ?? '[ZONE COVERAGE]')
       .replaceAll('[DEPOT & SIDING (WITHIN ZONE)]', info?.depot ?? '[DEPOT & SIDING (WITHIN ZONE)]')
       .replaceAll('[DEPOT & SIDING NEARBY ZONE]', info?.depotNearby ?? '[DEPOT & SIDING NEARBY ZONE]')
       .replaceAll('[NOTES]', info?.notes ?? '[NOTES]')
-      .replaceAll('[TRAINEE]', traineeName || '[TRAINEE]')
-      .replaceAll('[TRAINER]', trainerName || '[TRAINER]')
+      .replaceAll('[TRAINEE]', mention(traineeDiscordId, 'TRAINEE DISCORD ID REQUIRED'))
+      .replaceAll('[TRAINER]', mention(trainerDiscordId, 'TRAINER DISCORD ID REQUIRED'))
       .replaceAll('[ZONE]', zone || '[ZONE]');
   }, []);
 
@@ -1365,14 +1444,14 @@ Thank you for attending.`;
                 <button className={`${styles.ovrBtn} ${styles.hostOnly} ${overrides['staff-delete'] ? styles.on : ''}`} onClick={() => toggleOverride('staff-delete')}>
                   <FontAwesomeIcon icon={ICONS.userSlash} /> Override Staff Deletion (Host only)
                 </button>
-                <button className={`${styles.ovrBtn} ${styles.hostOnly} ${styles.dangerous} ${overrides['allow-all'] ? styles.on : ''}`} onClick={() => toggleOverride('allow-all')}>
-                  <FontAwesomeIcon icon={ICONS.triangleExclamation} /> Allow Override for Everyone
-                </button>
                 <button
-                  className={`${styles.ovrBtn} ${styles.binaryControl} ${overrides['staff-addition'] ? styles.allowed : styles.denied}`}
+                  className={`${styles.ovrBtn} ${overrides['staff-addition'] ? styles.on : ''}`}
                   onClick={() => toggleOverride('staff-addition')}
                 >
                   <FontAwesomeIcon icon={ICONS.userPlus} /> Allow Staff Addition
+                </button>
+                <button className={`${styles.ovrBtn} ${styles.hostOnly} ${styles.dangerous} ${overrides['allow-all'] ? styles.on : ''}`} onClick={() => toggleOverride('allow-all')}>
+                  <FontAwesomeIcon icon={ICONS.triangleExclamation} /> Allow Override for Everyone
                 </button>
               </div>
             </div>
@@ -1671,11 +1750,13 @@ Thank you for attending.`;
                             <LiveTimerText
                               timer={t}
                               fallbackSeconds={(session.trainee_timer || 12) * 60}
-                              onExpired={() => showToast(`Time is over for ${traineeLabel(row)}.`, 'warning')}
+                              warningSeconds={prefTraineeWarning ? prefTraineeWarningTimes : []}
+                              onWarning={playTraineeWarning.bind(null, row, t.syncedAt)}
+                              onExpired={() => expireTimer(row)}
                             />
                             {!isAssistant && (
                               <>
-                                <button className={`${styles.timerBtn} ${t.running ? styles.active : ''}`} onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t.running ? ICONS.pause : ICONS.play} /></button>
+                                <button className={`${styles.timerBtn} ${t.running ? styles.active : ''}`} disabled={!t.running && t.remainingSeconds <= 0} onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t.running ? ICONS.pause : ICONS.play} /></button>
                                 <button className={styles.timerBtn} onClick={() => resetTimer(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.redo} /></button>
                                 <button
                                   className={`${styles.timerBtn} ${t.setupSeconds != null ? styles.recorded : ''}`}
@@ -1754,7 +1835,7 @@ Thank you for attending.`;
                           <div className={styles.announcementCell}>
                             <button
                               className={`${styles.announcementCopyBtn} ${copiedKey === `announcement-${row}` ? styles.copied : ''}`}
-                              onClick={() => copyWithFeedback(`announcement-${row}`, resolveAnnouncement(row, detail.discord, detail.trainerName, detail.zone), `Announcement for ${traineeLabel(row)}`)}
+                              onClick={() => copyWithFeedback(`announcement-${row}`, resolveAnnouncement(detail.discordId, staffDirectory[detail.trainerName] ?? '', detail.zone), `Announcement for ${traineeLabel(row)}`)}
                             >
                               <FontAwesomeIcon icon={copiedKey === `announcement-${row}` ? ICONS.check : ICONS.copy} />
                             </button>
@@ -1960,11 +2041,11 @@ Thank you for attending.`;
                 className={`${styles.addBtn} ${!canAddStaff || staffShift.length >= 10 ? styles.locked : ''}`}
                 aria-disabled={!canAddStaff || staffShift.length >= 10}
                 onClick={() => {
-                  if (!overrides['staff-addition']) {
+                  if (!allowAll && !overrides['staff-addition']) {
                     showToast('Staff addition is disabled by the Host.', 'warning');
                     return;
                   }
-                  if (!isHost && !isMainAst) {
+                  if (!allowAll && !isHost && !isMainAst) {
                     showToast('Only the Host or the current Main AST can add staff.', 'warning');
                     return;
                   }
@@ -2076,7 +2157,17 @@ Thank you for attending.`;
                 const internalHelpers = staffShift.filter((s) => s.role === 'Internal Helper').map((s) => s.discord).filter(Boolean);
 
                 const allocatedNamed = allocatedRows
-                  .map((row, i) => ({ row, idx: i + 1, name: (session[`trainee_${i + 1}_name`] as string) || '', trainer: (session[`trainee_${i + 1}_trainer_name`] as string) || '' }))
+                  .map((row) => {
+                    const slot = parseInt(row, 10) + 1;
+                    const details = traineeDetails[row] ?? buildTraineeDetail(session, row);
+                    return {
+                      row,
+                      name: details.roblox.trim() || (session[`trainee_${slot}_name`] as string) || '',
+                      trainer: details.trainerName.trim()
+                        || (session[`trainee_${slot}_trainer_name`] as string)?.trim()
+                        || '—',
+                    };
+                  })
                   .filter((t) => t.name.trim() !== '');
                 const unallocatedNamed = unallocated.filter((u) => u.discord.trim() !== '');
 
@@ -2170,6 +2261,8 @@ Thank you for attending.`;
       <audio ref={cohostAckSoundRef} src="/assets/sounds/CoHostBuzzer.ogg" preload="auto" />
       <audio ref={assistantAckSoundRef} src="/assets/sounds/AssistantBuzzer.ogg" preload="auto" />
       <audio ref={announcementSoundRef} src="/assets/sounds/Announcement.ogg" preload="auto" />
+      <audio ref={traineeWarningSoundRef} src="/assets/sounds/TraineeWarning.ogg" preload="auto" />
+      <audio ref={traineeOverSoundRef} src="/assets/sounds/TraineeOver.ogg" preload="auto" />
 
       {/* ── Announce widget (host only) ── */}
       {isHost && (
@@ -2217,23 +2310,7 @@ Thank you for attending.`;
       </div>
 
       {/* ── Toasts ── */}
-      <div className={styles.toastContainer} aria-live="polite" aria-atomic="false">
-        {toasts.map((t) => (
-          <div key={t.id} className={`${styles.toast} ${styles.show} ${styles[t.kind]}`}>
-            <div className={styles.toastMsg}>
-              <FontAwesomeIcon icon={t.kind === 'success' ? ICONS.check : t.kind === 'info' ? ICONS.circleDot : ICONS.triangleExclamation} />
-              <div className={styles.toastText}>
-                <span className={styles.toastActor}>{t.actorName}</span>
-                <span>{t.message}</span>
-              </div>
-            </div>
-            <button type="button" className={styles.toastDismiss} aria-label="Dismiss notification" onClick={() => dismissToast(t.id)}>
-              <FontAwesomeIcon icon={ICONS.xmark} />
-            </button>
-            <div className={styles.toastTimer} />
-          </div>
-        ))}
-      </div>
+      <ToastStack toasts={toasts} onDismiss={dismissToast} timed />
 
       {/* ── Confirm modal ── */}
       {confirmState && (
@@ -2339,8 +2416,11 @@ Thank you for attending.`;
                   <LiveTimerText
                     timer={t}
                     fallbackSeconds={totalSeconds}
+                    warningSeconds={prefTraineeWarning ? prefTraineeWarningTimes : []}
+                    onWarning={playTraineeWarning.bind(null, row, t?.syncedAt ?? 0)}
+                    onExpired={() => expireTimer(row)}
                   />
-                  <button className={`${styles.timerBtn} ${t?.running ? styles.active : ''}`} title="Start/pause" onClick={() => toggleTimer(row)}>
+                  <button className={`${styles.timerBtn} ${t?.running ? styles.active : ''}`} title="Start/pause" disabled={Boolean(t && !t.running && t.remainingSeconds <= 0)} onClick={() => toggleTimer(row)}>
                     <FontAwesomeIcon icon={t?.running ? ICONS.pause : ICONS.play} />
                   </button>
                   <button className={styles.timerBtn} title="Reset" onClick={() => resetTimer(row, totalSeconds)}>
@@ -2440,8 +2520,11 @@ Thank you for attending.`;
                   <LiveTimerText
                     timer={t}
                     fallbackSeconds={(session.trainee_timer || 12) * 60}
+                    warningSeconds={prefTraineeWarning ? prefTraineeWarningTimes : []}
+                    onWarning={playTraineeWarning.bind(null, row, t.syncedAt)}
+                    onExpired={() => expireTimer(row)}
                   />
-                  <button className={`${styles.timerBtn} ${t.running ? styles.active : ''}`} onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t.running ? ICONS.pause : ICONS.play} /></button>
+                  <button className={`${styles.timerBtn} ${t.running ? styles.active : ''}`} disabled={!t.running && t.remainingSeconds <= 0} onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t.running ? ICONS.pause : ICONS.play} /></button>
                   <button className={styles.timerBtn} onClick={() => resetTimer(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.redo} /></button>
                   <button
                     className={`${styles.timerBtn} ${t.setupSeconds != null ? styles.recorded : ''}`}
@@ -2587,12 +2670,15 @@ Thank you for attending.`;
                 <LiveTimerText
                   timer={t}
                   fallbackSeconds={(session.trainee_timer || 12) * 60}
+                  warningSeconds={prefTraineeWarning ? prefTraineeWarningTimes : []}
+                  onWarning={playTraineeWarning.bind(null, row, t?.syncedAt ?? 0)}
                   large
+                  onExpired={() => expireTimer(row)}
                 />
               )}
               {canControl ? (
                 <div className={styles.timerCellInner} style={{ justifyContent: 'center' }}>
-                  <button className={`${styles.timerBtn} ${t?.running ? styles.active : ''}`} onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t?.running ? ICONS.pause : ICONS.play} /></button>
+                  <button className={`${styles.timerBtn} ${t?.running ? styles.active : ''}`} disabled={Boolean(t && !t.running && t.remainingSeconds <= 0)} onClick={() => toggleTimer(row)}><FontAwesomeIcon icon={t?.running ? ICONS.pause : ICONS.play} /></button>
                   <button className={styles.timerBtn} onClick={() => resetTimer(row, (session.trainee_timer || 12) * 60)}><FontAwesomeIcon icon={ICONS.redo} /></button>
                   <button
                     className={styles.timerBtn}
