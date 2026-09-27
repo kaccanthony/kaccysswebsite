@@ -171,14 +171,28 @@ export default async function SessionOngoingPage({
   // effectiveUsername is already the Discord username for the real user, or
   // the impersonated username in person-mode View As. Do not compare the
   // Supabase auth UUID (user.id) to staffDirectory's Discord snowflake IDs.
-  const myDisplayName = user.viewingAs?.personLabel ?? user.effectiveUsername;
-
   const norm = (s: string | null | undefined) => (s ?? '').trim().toLowerCase();
+  // Session assignments use discord_username, while the header may display
+  // discord_server_name. Match both for real users; person-mode View As only
+  // matches the impersonated identity. Rank-only View As keeps real identity.
+  const viewerIdentities = new Set(
+    [user.effectiveUsername, ...(user.viewingAs?.personLabel ? [] : [user.discordUsername ?? ''])]
+      .map(norm)
+      .filter(Boolean)
+  );
+  const isHost = !!hostName && viewerIdentities.has(norm(hostName));
+  const isCohost = cohostNames.some((name) => viewerIdentities.has(norm(name)));
+  const isAssistant = assistantNames.some((name) => viewerIdentities.has(norm(name)));
+  const matchedStaffName = isHost
+    ? hostName
+    : cohostNames.find((name) => viewerIdentities.has(norm(name)))
+      ?? assistantNames.find((name) => viewerIdentities.has(norm(name)));
+  const myDisplayName = user.viewingAs?.personLabel ?? matchedStaffName ?? user.effectiveUsername;
+
   let viewerRole: ViewerRole = 'Assistant';
-  if (myDisplayName) {
-    if (norm(hostName) === norm(myDisplayName)) viewerRole = 'Host';
-    else if (cohostNames.some((c) => norm(c) === norm(myDisplayName))) viewerRole = 'Co-Host';
-  }
+  if (isHost) viewerRole = 'Host';
+  else if (isCohost) viewerRole = 'Co-Host';
+  else if (!isAssistant) viewerRole = 'Assistant';
 
   // ── SECURITY: only host/co-hosts/assistants on THIS session (or the real
   // signed-in admin, for support access) may view or edit the panel. Without
@@ -192,7 +206,7 @@ export default async function SessionOngoingPage({
   // even while impersonating a non-assigned person, since that's a deliberate
   // "check what this session looks like to nobody in particular" case.
   const assignedNames = [hostName, ...cohostNames, ...assistantNames].filter((n): n is string => !!n);
-  const isAssigned = assignedNames.some((n) => norm(n) === norm(myDisplayName));
+  const isAssigned = assignedNames.some((name) => viewerIdentities.has(norm(name)));
   if (!isAssigned && !user.isAdmin) {
     redirect('/dashboard?error=' + encodeURIComponent('You are not assigned to this session.'));
   }

@@ -1,7 +1,7 @@
 // FILE: components/VersionBadge.tsx
 // Position per your request: lower-LEFT. Note: the original version_badge.php
 // had this at bottom-right — flag if you actually wanted to keep it there.
-const YSS_VERSION = 'Alpha - v1.5.2';
+const YSS_VERSION = 'Alpha - v1.5.2a';
 
 export default function VersionBadge() {
   return (
