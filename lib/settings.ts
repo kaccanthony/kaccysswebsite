@@ -86,6 +86,7 @@ export interface ProfileRow {
   id: string;
   discord_id: string | null;
   discord_username: string;
+  discord_server_name: string | null;
   discord_avatar_url: string | null;
   roblox_username: string | null;
   hide_stats: boolean;
@@ -114,7 +115,7 @@ export async function fetchSettingsData(
 ): Promise<SettingsData> {
   const { data: profile } = await supabase
     .from('profiles')
-    .select('id, discord_id, discord_username, discord_avatar_url, roblox_username, hide_stats, notif_prefs')
+    .select('id, discord_id, discord_username, discord_server_name, discord_avatar_url, roblox_username, hide_stats, notif_prefs')
     .eq('id', userId)
     .single();
 
@@ -131,7 +132,7 @@ export async function fetchSettingsData(
     staffProfile: (staffProfile as StaffProfileRow) ?? null,
     isStaff: Boolean(staffProfile),
     prefs: mergePrefs(rawPrefs),
-    // DISPLAY NAME WORKAROUND — stored inside notif_prefs, falls back to discord_username
-    displayName: rawPrefs.display_name || profile?.discord_username || '',
+    // The profile display name follows the Discord server nickname, falling back to the username.
+    displayName: profile?.discord_server_name?.trim() || profile?.discord_username || '',
   };
 }

@@ -88,13 +88,14 @@ export default function ProfileForm({
 
           <div className="form-grid">
             <div className="form-group">
-              <label className="form-label">Display Name</label>
+              <label className="form-label">Display Name <span className="form-label-hint">synced from Discord</span></label>
               <div className="form-input-wrap">
                 <FontAwesomeIcon icon={faSignature} className="form-input-icon" />
                 <input
                   type="text"
                   name="display_name"
-                  className="form-input"
+                  className="form-input readonly"
+                  readOnly
                   maxLength={isStaff ? 200 : 50}
                   placeholder="How you appear on the platform"
                   defaultValue={displayName}

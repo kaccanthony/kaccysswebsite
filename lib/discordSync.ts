@@ -52,7 +52,9 @@ export async function syncDiscordRoles(
   }
   const member = await res.json();
   const roleIds: string[] = member.roles ?? [];
-  const discordServerName = typeof member.nick === 'string' && member.nick.trim() ? member.nick.trim() : null;
+  const discordServerName = typeof member.nick === 'string'
+    ? member.nick.trim().replace(/^(?:\[[^\]]+\]\s*)+/, '').trim() || null
+    : null;
   const { error: serverNameError } = await supabase
     .from('profiles')
     .update({ discord_server_name: discordServerName })
