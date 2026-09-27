@@ -86,30 +86,13 @@ export default async function ManageSessionPage() {
   const AUTH_COLUMNS = 'staff_rank, op_dept, host_auth, cohost_auth, asst_auth, comm_dept, eventh_auth, eventch_auth, ih_auth';
 
   const [{ data: realStaffRows }, { data: rosterRows }] = await Promise.all([
-    supabase.from('staff_profiles').select(`${AUTH_COLUMNS}, profiles(discord_username)`),
-    supabase.from('staff_roster').select(`discord_username, ${AUTH_COLUMNS}`).eq('claimed', false),
+    supabase.from('staff_profiles').select(`${AUTH_COLUMNS}, profiles(discord_username, discord_id)`),
+    supabase.from('staff_roster').select(`discord_id, discord_username, ${AUTH_COLUMNS}`),
   ]);
 
-  const staff: StaffOption[] = [
-    ...(realStaffRows ?? [])
-      .map((row) => {
-        const name = (row.profiles as unknown as { discord_username: string } | null)?.discord_username;
-        if (!name) return null;
-        return {
-          name,
-          staff_rank: row.staff_rank,
-          op_dept: row.op_dept,
-          host_auth: row.host_auth,
-          cohost_auth: row.cohost_auth,
-          asst_auth: row.asst_auth,
-          comm_dept: row.comm_dept,
-          eventh_auth: row.eventh_auth,
-          eventch_auth: row.eventch_auth,
-          ih_auth: row.ih_auth,
-        };
-      })
-      .filter((r): r is NonNullable<typeof r> => r !== null),
-    ...(rosterRows ?? []).map((row) => ({
+  const staffByIdentity = new Map<string, StaffOption>();
+  for (const row of rosterRows ?? []) {
+    staffByIdentity.set((row.discord_id || row.discord_username).toLowerCase(), {
       name: row.discord_username,
       staff_rank: row.staff_rank,
       op_dept: row.op_dept,
@@ -120,8 +103,26 @@ export default async function ManageSessionPage() {
       eventh_auth: row.eventh_auth,
       eventch_auth: row.eventch_auth,
       ih_auth: row.ih_auth,
-    })),
-  ].sort((a, b) => a.name.localeCompare(b.name));
+    });
+  }
+  for (const row of realStaffRows ?? []) {
+    const profile = row.profiles as unknown as { discord_username: string | null; discord_id: string | null } | null;
+    const name = profile?.discord_username;
+    if (!name) continue;
+    staffByIdentity.set((profile.discord_id || name).toLowerCase(), {
+      name,
+      staff_rank: row.staff_rank,
+      op_dept: row.op_dept,
+      host_auth: row.host_auth,
+      cohost_auth: row.cohost_auth,
+      asst_auth: row.asst_auth,
+      comm_dept: row.comm_dept,
+      eventh_auth: row.eventh_auth,
+      eventch_auth: row.eventch_auth,
+      ih_auth: row.ih_auth,
+    });
+  }
+  const staff = [...staffByIdentity.values()].sort((a, b) => a.name.localeCompare(b.name));
 
   return (
       <ManageSessionInteractive

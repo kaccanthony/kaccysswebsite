@@ -51,32 +51,38 @@ export async function GET(request: Request) {
       // normal RLS wouldn't allow reading/updating it any other way.
       if (discordId) {
         const admin = createAdminClient();
-        const { data: rosterRow } = await admin
-          .from('staff_roster')
-          .select('staff_rank, staff_joined, staff_perm_level, op_dept, host_auth, cohost_auth, asst_auth, comm_dept, eventh_auth, eventch_auth, ih_auth')
-          .eq('discord_id', discordId)
-          .eq('claimed', false)
-          .maybeSingle();
+        const [{ data: existingStaffProfile }, { data: rosterRow }] = await Promise.all([
+          admin.from('staff_profiles').select('id').eq('id', data.user.id).maybeSingle(),
+          admin
+            .from('staff_roster')
+            .select('staff_rank, staff_joined, staff_perm_level, op_dept, host_auth, cohost_auth, asst_auth, comm_dept, eventh_auth, eventch_auth, ih_auth, claimed')
+            .eq('discord_id', discordId)
+            .maybeSingle(),
+        ]);
 
         if (rosterRow) {
-          const { error: claimError } = await supabase.from('staff_profiles').upsert({
-            id: data.user.id,
-            staff_rank: rosterRow.staff_rank,
-            staff_joined: rosterRow.staff_joined,
-            staff_perm_level: rosterRow.staff_perm_level,
-            op_dept: rosterRow.op_dept,
-            host_auth: rosterRow.host_auth,
-            cohost_auth: rosterRow.cohost_auth,
-            asst_auth: rosterRow.asst_auth,
-            comm_dept: rosterRow.comm_dept,
-            eventh_auth: rosterRow.eventh_auth,
-            eventch_auth: rosterRow.eventch_auth,
-            ih_auth: rosterRow.ih_auth,
-          });
+          let claimError: { message: string } | null = null;
+          if (!existingStaffProfile || !rosterRow.claimed) {
+            const result = await admin.from('staff_profiles').upsert({
+              id: data.user.id,
+              staff_rank: rosterRow.staff_rank,
+              staff_joined: rosterRow.staff_joined,
+              staff_perm_level: rosterRow.staff_perm_level,
+              op_dept: rosterRow.op_dept,
+              host_auth: rosterRow.host_auth,
+              cohost_auth: rosterRow.cohost_auth,
+              asst_auth: rosterRow.asst_auth,
+              comm_dept: rosterRow.comm_dept,
+              eventh_auth: rosterRow.eventh_auth,
+              eventch_auth: rosterRow.eventch_auth,
+              ih_auth: rosterRow.ih_auth,
+            });
+            claimError = result.error;
+          }
 
           if (claimError) {
             console.error('staff_profiles claim upsert failed:', claimError.message);
-          } else {
+          } else if (!rosterRow.claimed) {
             await admin
               .from('staff_roster')
               .update({ claimed: true, claimed_at: new Date().toISOString() })

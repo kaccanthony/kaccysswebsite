@@ -146,11 +146,11 @@ export default async function SessionOngoingPage({
   // dropdown's option list at all.
   const { data: rosterRows } = await admin
     .from('staff_roster')
-    .select('discord_id, discord_username, staff_rank')
-    .eq('claimed', false);
+    .select('discord_id, discord_username, staff_rank');
 
   for (const row of rosterRows ?? []) {
-    if (!staffDirectory[row.discord_username]) staffDirectory[row.discord_username] = row.discord_id ?? '';
+    if (staffDirectory[row.discord_username]) continue;
+    staffDirectory[row.discord_username] = row.discord_id ?? '';
     if (HOST_ELIGIBLE_RANKS.includes(row.staff_rank)) eligibleHost.add(row.discord_username);
     if (cohostEligibleRanks.includes(row.staff_rank)) eligibleCohost.add(row.discord_username);
     if (assistantEligibleRanks.includes(row.staff_rank)) eligibleAssistant.add(row.discord_username);
