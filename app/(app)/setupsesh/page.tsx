@@ -66,8 +66,15 @@ export default async function SetupSessionPage({
   // sessions, not the real signed-in dev's. 'rank' mode sessions have no
   // personLabel, so effectiveUsername just falls back to the real name and this
   // behaves exactly as before for that case.
+  const hostIdentities = new Set(
+    [user.effectiveUsername, ...(user.viewingAs ? [] : [user.discordUsername ?? ''])]
+      .map((name) => name.trim().toLowerCase())
+      .filter(Boolean)
+  );
   const mySessions = allSessionsToday.filter((s) =>
-    s.staffRows.some((r) => (r.role === 'HOST' || r.role.startsWith('HOST,')) && r.staff_name === user.effectiveUsername)
+    s.staffRows.some((r) =>
+      (r.role === 'HOST' || r.role.startsWith('HOST,')) && hostIdentities.has(r.staff_name.trim().toLowerCase())
+    )
   );
 
   // Same staff-eligibility merge as managesession/page.tsx — needed for the

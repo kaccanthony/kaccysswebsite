@@ -16,6 +16,7 @@ export interface ViewAsState {
 export interface CurrentUser {
   id: string;
   username: string;
+  discordUsername: string | null;
   avatarUrl: string | null;
   robloxUsername: string | null;
   robloxAvatarUrl: string | null;
@@ -107,6 +108,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser> => {
   return {
     id: authUser.id,
     username: realUsername,
+    discordUsername: profile?.discord_username ?? null,
     avatarUrl: profile?.discord_avatar_url ?? null,
     robloxUsername: profile?.roblox_username ?? null,
     robloxAvatarUrl: profile?.roblox_avatar_url ?? null,
