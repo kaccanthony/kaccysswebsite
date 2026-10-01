@@ -5,8 +5,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
-import type { DriverRow, LiveState, StaffShiftRow } from '@/types/session';
+import type { DriverRow, LiveState, OverridesState, StaffShiftRow } from '@/types/session';
 import { SESSION_ONGOING_COLUMNS } from '@/lib/supabase/columns';
+import { isWithinSessionTraineeLimit, SESSION_TRAINEE_LIMIT_MESSAGE } from '@/lib/session/traineeLimit';
+import { getSessionControlAccess } from '@/lib/session/controlPermissions';
+import { isInternalHelperRole } from '@/lib/sessionStaffTrainees';
 
 const ONGOING_COLUMNS = new Set([
   'session_status', 'additional_notes', 'session_date', 'session_time', 'trainee_timer',
@@ -26,6 +29,11 @@ const LIVE_STATE_FIELDS = new Set<keyof LiveState>([
   'sessionHost', 'trainees', 'timers', 'drivers', 'staffShift', 'feedbackData',
   'completedRows', 'slotOrder', 'unallocatedTrainees', 'timeTracker',
   'mainAstNotes', 'overrides', 'announcement',
+]);
+
+const OVERRIDE_KEYS = new Set<keyof OverridesState>([
+  'session-details', 'trainees', 'staff-roles', 'drivers-disable', 'slot-order',
+  'staff-delete', 'trainee-details', 'trainer-details', 'staff-addition', 'allow-all',
 ]);
 
 const KEYED_MERGE_FIELDS = [
@@ -61,6 +69,13 @@ function normalizeShiftRole(value: unknown): StaffShiftRow['role'] {
 
 function additionalDatabaseRole(role: StaffShiftRow['role']): string {
   return `Add T. ${role}`;
+}
+
+function shiftRole(role: string): StaffShiftRow['role'] {
+  if (isInternalHelperRole(role)) return 'Internal Helper';
+  if (role.startsWith('CH_') || role === 'Add T. Co-Host') return 'Co-Host';
+  if (role.startsWith('AST_1') || role === 'Add T. Main AST') return 'Main AST';
+  return 'Assistant';
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -122,7 +137,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .eq('session_id', sessionId),
     supabase
       .from('session_trainees')
-      .select('trainee_row_id, slot_number, is_standby')
+      .select('trainee_row_id, slot_number, is_standby, trainee_roblox_username, trainee_discord, trainee_discord_id, zone, note, trainer_name, attended')
       .eq('session_id', sessionId),
     supabase
       .from('session_drivers')
@@ -148,6 +163,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!adminRow && (!username || !activeStaff.includes(username))) {
     return NextResponse.json({ success: false, message: 'You are not assigned to this session.' }, { status: 403 });
   }
+
+  const actorAssignments = (assignedStaff ?? []).filter((row) =>
+    String(row.staff_name ?? '').trim().toLowerCase() === username
+  );
+  const persistedStaffShift = (current.live_state as LiveState | null)?.staffShift ?? [];
+  const effectiveShiftRole = (row: (typeof actorAssignments)[number]) => {
+    const liveRow = persistedStaffShift.find((member) => member.sourceRowId === row.staff_row_id &&
+      member.discord.trim().toLowerCase() === username);
+    return liveRow?.role ?? shiftRole(row.role);
+  };
+  const actorRoles = {
+    host: actorAssignments.some((row) => row.role === 'HOST' || row.role.startsWith('HOST,')),
+    coHost: actorAssignments.some((row) => effectiveShiftRole(row) === 'Co-Host'),
+    mainAst: actorAssignments.some((row) => effectiveShiftRole(row) === 'Main AST'),
+    internalHelper: actorAssignments.some((row) => effectiveShiftRole(row) === 'Internal Helper'),
+  };
+  const persistedOverrides: Partial<OverridesState> = (current.live_state as LiveState | null)?.overrides ?? {};
+  const controlAccess = getSessionControlAccess(persistedOverrides, actorRoles);
 
   const ongoingPatch: Record<string, unknown> = {};
   const traineePatches = new Map<number, Record<string, unknown>>();
@@ -215,6 +248,71 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (Object.keys(incoming).length > 0) incomingLiveState = incoming;
   }
 
+  if (incomingLiveState?.overrides !== undefined) {
+    if (!actorRoles.host) {
+      return NextResponse.json({ success: false, message: 'Only the Host can change session controls.' }, { status: 403 });
+    }
+    const requested = incomingLiveState.overrides as unknown;
+    if (!requested || typeof requested !== 'object' || Array.isArray(requested) ||
+      Object.entries(requested).some(([key, value]) => !OVERRIDE_KEYS.has(key as keyof OverridesState) || typeof value !== 'boolean')) {
+      return NextResponse.json({ success: false, message: 'Invalid session controls.' }, { status: 400 });
+    }
+  }
+
+  if ((requestedHost !== undefined || Object.keys(ongoingPatch).some((key) => key !== 'session_status') || incomingLiveState?.sessionHost !== undefined) && !controlAccess.sessionDetails) {
+    return NextResponse.json({ success: false, message: 'Session details are locked for your role.' }, { status: 403 });
+  }
+  const completedRows = (current.live_state as LiveState | null)?.completedRows ?? {};
+  const allDone = Object.keys(completedRows).length > 0 && Object.values(completedRows).every(Boolean);
+  const canChangeStatus = actorRoles.host || persistedOverrides['allow-all'] === true ||
+    ((actorRoles.coHost || actorRoles.internalHelper) && (persistedOverrides['session-details'] === true || allDone));
+  if ('session_status' in ongoingPatch && !canChangeStatus) {
+    return NextResponse.json({ success: false, message: 'Session status is locked for your role.' }, { status: 403 });
+  }
+  if (incomingLiveState?.slotOrder !== undefined && !controlAccess.slotOrder) {
+    return NextResponse.json({ success: false, message: 'Slot ordering is locked for your role.' }, { status: 403 });
+  }
+  if (incomingLiveState?.drivers !== undefined && !controlAccess.drivers) {
+    return NextResponse.json({ success: false, message: 'Driver input is disabled for your role.' }, { status: 403 });
+  }
+
+  for (const [slot, slotPatch] of traineePatches) {
+    const existing = (currentTrainees ?? []).find((row) => Number(row.slot_number) === slot);
+    const removing = Boolean(existing && controlAccess.trainees &&
+      ['trainee_roblox_username', 'trainee_discord', 'trainee_discord_id', 'zone', 'note', 'trainer_name']
+        .every((field) => field in slotPatch && (slotPatch[field] === null || slotPatch[field] === '')));
+    for (const [field, value] of Object.entries(slotPatch)) {
+      if (field === 'attended' || value === (existing as Record<string, unknown> | undefined)?.[field] ||
+        (value === null && !(existing as Record<string, unknown> | undefined)?.[field])) continue;
+      const allowed = removing || (field === 'trainer_name' ? controlAccess.trainerDetails : (controlAccess.traineeDetails || controlAccess.trainees));
+      if (!allowed) return NextResponse.json({ success: false, message: 'Trainee details are locked for your role.' }, { status: 403 });
+    }
+  }
+
+  if (incomingLiveState?.trainees !== undefined) {
+    if (!incomingLiveState.trainees || typeof incomingLiveState.trainees !== 'object' || Array.isArray(incomingLiveState.trainees) || traineePatches.size === 0) {
+      return NextResponse.json({ success: false, message: 'Invalid trainee state.' }, { status: 400 });
+    }
+    // Build live rows from the validated database patches so a caller cannot
+    // hide unauthorized changes in the separately supplied live_state snapshot.
+    const validatedRows: NonNullable<LiveState['trainees']> = {};
+    for (const [slot, patch] of traineePatches) {
+      const existing = (currentTrainees ?? []).find((row) => Number(row.slot_number) === slot);
+      const value = (field: string) => field in patch ? patch[field] : (existing as Record<string, unknown> | undefined)?.[field];
+      const zone = value('zone');
+      validatedRows[String(slot - 1)] = {
+        discord: String(value('trainee_discord') ?? ''),
+        discordId: String(value('trainee_discord_id') ?? ''),
+        roblox: String(value('trainee_roblox_username') ?? ''),
+        zone: zone == null || zone === '' ? '' : `Zone ${zone}`,
+        notes: String(value('note') ?? ''),
+        trainerName: String(value('trainer_name') ?? ''),
+        attended: Boolean(value('attended')),
+      };
+    }
+    incomingLiveState.trainees = validatedRows;
+  }
+
   if (
     Object.keys(ongoingPatch).length === 0 &&
     traineePatches.size === 0 &&
@@ -222,6 +320,47 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     requestedHost === undefined
   ) {
     return NextResponse.json({ success: false, message: 'Nothing to update.' }, { status: 400 });
+  }
+
+  if (incomingLiveState?.unallocatedTrainees !== undefined) {
+    if (!Array.isArray(incomingLiveState.unallocatedTrainees)) {
+      return NextResponse.json({ success: false, message: 'Invalid unallocated trainee list.' }, { status: 400 });
+    }
+    if (incomingLiveState.unallocatedTrainees.some((row) => !row || typeof row !== 'object' || typeof row.uid !== 'string')) {
+      return NextResponse.json({ success: false, message: 'Invalid unallocated trainee.' }, { status: 400 });
+    }
+    const storedUnallocated = (current.live_state as LiveState | null)?.unallocatedTrainees;
+    const currentUnallocated = Array.isArray(storedUnallocated) ? storedUnallocated : [];
+    const currentByUid = new Map(currentUnallocated.map((row) => [row.uid, row]));
+    const nextByUid = new Map(incomingLiveState.unallocatedTrainees.map((row) => [row.uid, row]));
+    if (nextByUid.size !== incomingLiveState.unallocatedTrainees.length) {
+      return NextResponse.json({ success: false, message: 'Duplicate unallocated trainee.' }, { status: 400 });
+    }
+    const listChanged = currentByUid.size !== nextByUid.size ||
+      [...currentByUid.keys()].some((uid) => !nextByUid.has(uid));
+    if (listChanged && !controlAccess.trainees) {
+      return NextResponse.json({ success: false, message: 'Adding or deleting trainees is locked for your role.' }, { status: 403 });
+    }
+    for (const row of incomingLiveState.unallocatedTrainees) {
+      const previous = currentByUid.get(row.uid);
+      const detailsChanged = (['discord', 'discordId', 'roblox', 'zone', 'notes'] as const)
+        .some((field) => String(row[field] ?? '') !== String(previous?.[field] ?? ''));
+      if (detailsChanged && !(controlAccess.traineeDetails || controlAccess.trainees)) {
+        return NextResponse.json({ success: false, message: 'Trainee details are locked for your role.' }, { status: 403 });
+      }
+      if (String(row.trainerName ?? '') !== String(previous?.trainerName ?? '') && !controlAccess.trainerDetails) {
+        return NextResponse.json({ success: false, message: 'Trainer assignment is locked for your role.' }, { status: 403 });
+      }
+    }
+    const currentUnallocatedCount = currentUnallocated.length;
+    const nextUnallocatedCount = incomingLiveState.unallocatedTrainees.length;
+    const fixedSlots = Number(current.num_slots) + (currentTrainees ?? []).filter((row) => row.is_standby).length;
+    if (
+      nextUnallocatedCount > currentUnallocatedCount &&
+      !isWithinSessionTraineeLimit(fixedSlots, nextUnallocatedCount)
+    ) {
+      return NextResponse.json({ success: false, message: SESSION_TRAINEE_LIMIT_MESSAGE }, { status: 400 });
+    }
   }
 
   // RLS in current_db.sql intentionally limits child-table updates by rank.
@@ -305,18 +444,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const existingNonHosts = (assignedStaff ?? []).filter(
       (row) => !(row.role === 'HOST' || row.role.startsWith('HOST,'))
     );
-    const actorAssignments = (assignedStaff ?? []).filter(
-      (row) => String(row.staff_name ?? '').trim().toLowerCase() === username
-    );
-    const hostName = String((current.live_state as LiveState | null)?.sessionHost ?? '').trim().toLowerCase();
-    const actorIsHost = Boolean(username && hostName && username === hostName);
-    const actorCanManageAdditions = Boolean(adminRow) || actorIsHost || actorAssignments.some((row) =>
-      row.role === 'HOST' || row.role.startsWith('HOST,') || row.role === 'AST_1' || row.role.startsWith('AST_1,')
-    );
-    const persistedOverrides = ((current.live_state as LiveState | null)?.overrides ?? {});
-    const effectiveOverrides = { ...persistedOverrides, ...(incomingLiveState.overrides ?? {}) };
-    const allowAll = effectiveOverrides['allow-all'] === true;
-    const staffAdditionAllowed = allowAll || (effectiveOverrides['staff-addition'] ?? false);
     const requestsNewStaff = incomingLiveState.staffShift.some((rawRow) => {
       if (!rawRow || typeof rawRow !== 'object') return false;
       const row = rawRow as StaffShiftRow;
@@ -328,11 +455,31 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         || String(candidate.staff_name).trim().toLowerCase() === staffName.toLowerCase()
       );
     });
-    if (requestsNewStaff && (!staffAdditionAllowed || (!allowAll && !actorCanManageAdditions))) {
+    if (requestsNewStaff && !controlAccess.staffAddition) {
       return NextResponse.json(
-        { success: false, message: !staffAdditionAllowed ? 'Staff addition is disabled by the Host.' : 'Only the Host or Main AST can add staff.' },
+        { success: false, message: 'Only the Host or an Internal Helper can add staff when this control is enabled.' },
         { status: 403 }
       );
+    }
+    const keptExistingIds = new Set(incomingLiveState.staffShift.map((rawRow) => {
+      const row = rawRow as StaffShiftRow;
+      const requestedId = Number(row?.sourceRowId);
+      return existingNonHosts.find((candidate) => candidate.staff_row_id === requestedId ||
+        String(candidate.staff_name).trim().toLowerCase() === String(row?.discord ?? '').trim().toLowerCase())?.staff_row_id;
+    }));
+    if (!controlAccess.staffDelete && existingNonHosts.some((row) => !keptExistingIds.has(row.staff_row_id))) {
+      return NextResponse.json({ success: false, message: 'Staff deletion is locked for your role.' }, { status: 403 });
+    }
+    if (!controlAccess.staffRoles && incomingLiveState.staffShift.some((rawRow) => {
+      const row = rawRow as StaffShiftRow;
+      const requestedId = Number(row?.sourceRowId);
+      const existing = existingNonHosts.find((candidate) => candidate.staff_row_id === requestedId ||
+        String(candidate.staff_name).trim().toLowerCase() === String(row?.discord ?? '').trim().toLowerCase());
+      const previousRole = persistedStaffShift.find((member) => member.sourceRowId === existing?.staff_row_id)?.role ?? (existing ? shiftRole(existing.role) : null);
+      return existing && (row.role !== previousRole ||
+        String(row.discord ?? '').trim().toLowerCase() !== String(existing.staff_name).trim().toLowerCase());
+    })) {
+      return NextResponse.json({ success: false, message: 'Staff assignments and roles are locked for your role.' }, { status: 403 });
     }
     const keptIds = new Set<number>();
     const normalizedRows: StaffShiftRow[] = [];

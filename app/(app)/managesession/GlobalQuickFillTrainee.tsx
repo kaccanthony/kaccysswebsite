@@ -15,7 +15,7 @@ export default function GlobalQuickFillTrainee() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [candidates, setCandidates] = useState<SessionMatch[] | null>(null); // set when >1 match — asks user to pick
-  const [pendingFill, setPendingFill] = useState<{ roblox: string; discord: string; discordId: string; zone: string; position: string; notes: string } | null>(null);
+  const [pendingFill, setPendingFill] = useState<{ roblox: string; discord: string; discordId: string; zone: string; notes: string } | null>(null);
   const [success, setSuccess] = useState(false);
 
   function close() {
@@ -101,7 +101,7 @@ export default function GlobalQuickFillTrainee() {
     }
     setLoading(false);
 
-    const fillData = { roblox: robloxUsername, discord: discordUsername, discordId, zone: parsed.zone, position: parsed.position, notes: parsed.notes };
+    const fillData = { roblox: robloxUsername, discord: discordUsername, discordId, zone: parsed.zone, notes: parsed.notes };
 
     if (allMatches.length === 0) {
       setError(`No session found for host "${resolvedHost}" on that date — check the paste matches an existing session.`);
@@ -123,7 +123,6 @@ export default function GlobalQuickFillTrainee() {
       discordUsername: fill.discord,
       discordId: fill.discordId,
       zone: fill.zone,
-      trainerName: fill.position || undefined,
       note: fill.notes || undefined,
     });
     setLoading(false);

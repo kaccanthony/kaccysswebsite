@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
+import { createAdminClient } from '@/utils/supabase/admin';
 import { buildRowsFromSession, fetchSession } from '@/lib/activeSession';
 
 export async function GET(req: NextRequest) {
@@ -8,13 +8,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ rows: [], message: 'Invalid session id.' }, { status: 400 });
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ rows: [] }, { status: 401 });
-
-  const session = await fetchSession(supabase, sessionId);
+  // This endpoint exposes only the same read-only fields rendered by /active.
+  // Use the service client because session tables are otherwise authenticated-only.
+  const session = await fetchSession(createAdminClient(), sessionId);
   if (!session) return NextResponse.json({ rows: [] }, { status: 404 });
 
   const persistedChange = session.last_updated ?? session.started_at;
@@ -22,5 +18,5 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     rows: buildRowsFromSession(session),
     lastChangeAt: Number.isFinite(lastChangeAt) ? lastChangeAt : null,
-  });
+  }, { headers: { 'Cache-Control': 'no-store' } });
 }

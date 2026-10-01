@@ -1,6 +1,7 @@
 // FILE: app/(app)/dashboard/page.tsx
 import { getCurrentUser } from '@/lib/getCurrentUser';
-import { getVisibleCards } from '@/lib/roles';
+import { getFeedbackTrainerAccess } from '@/lib/feedbackTrainerAccess';
+import { getAllCards, getVisibleCards } from '@/lib/roles';
 import { createClient } from '@/utils/supabase/server';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { ICONS, type IconKey } from '@/lib/icons';
@@ -13,6 +14,7 @@ export const metadata = {
 
 export default async function DashboardPage() {
   const user = await getCurrentUser();
+  const feedbackAccess = await getFeedbackTrainerAccess();
   const supabase = await createClient();
 
   // ── Is this person currently running a live session? (for the "my_session" card) ──
@@ -48,7 +50,10 @@ export default async function DashboardPage() {
     rawRole: user.effectiveRole,
     isAdmin: user.effectiveIsAdmin,
     myLiveSessionId,
-  });
+  }).filter((card) => card.key !== 'feedback' || feedbackAccess !== null);
+  if (feedbackAccess && !cards.some((card) => card.key === 'feedback')) {
+    cards.push(getAllCards(myLiveSessionId).feedback);
+  }
 
   return (
     <>

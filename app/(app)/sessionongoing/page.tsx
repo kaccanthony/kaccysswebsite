@@ -95,6 +95,20 @@ export default async function SessionOngoingPage({
     return (staffRows ?? []).find((r) => r.role === code || r.role.startsWith(`${code},`))?.staff_name ?? null;
   }
 
+  function shiftRole(role: string): StaffShiftRow['role'] {
+    if (isInternalHelperRole(role)) return 'Internal Helper';
+    if (role.startsWith('CH_') || role === 'Add T. Co-Host') return 'Co-Host';
+    if (role.startsWith('AST_1') || role === 'Add T. Main AST') return 'Main AST';
+    return 'Assistant';
+  }
+
+  const liveShift = (sessionRow.live_state as LiveState | null)?.staffShift ?? [];
+  const shiftRows = (staffRows ?? []).filter((row) => !(row.role === 'HOST' || row.role.startsWith('HOST,')));
+  const currentShiftRole = (row: (typeof shiftRows)[number]) => liveShift.find((member) =>
+    member.sourceRowId === row.staff_row_id &&
+    member.discord.trim().toLowerCase() === row.staff_name.trim().toLowerCase()
+  )?.role ?? shiftRole(row.role);
+
   // Staff assignments stay in session_staff throughout the session. These
   // virtual fields are added to initialSession for the controller UI only.
   const hostName = findRole('HOST');
@@ -104,14 +118,14 @@ export default async function SessionOngoingPage({
     findRole('CH_3'),
     findRole('CH_4'),
   ];
-  const cohostNames = cohostSlots.filter((n): n is string => !!n);
+  const cohostNames = shiftRows.filter((row) => currentShiftRole(row) === 'Co-Host').map((row) => row.staff_name);
   const assistantSlots = [
     findRole('AST_1'),
     findRole('AST_2'),
     findRole('AST_3'),
     findRole('AST_4'),
   ];
-  const assistantNames = assistantSlots.filter((n): n is string => !!n);
+  const assistantNames = shiftRows.filter((row) => currentShiftRole(row) !== 'Co-Host').map((row) => row.staff_name);
 
   // staffDirectory maps discord_username -> real Discord snowflake ID — NOT the
   // Supabase auth uuid (row.id). The "Discord ID" field next to Session Host/
@@ -192,7 +206,10 @@ export default async function SessionOngoingPage({
   let viewerRole: ViewerRole = 'Assistant';
   if (isHost) viewerRole = 'Host';
   else if (isCohost) viewerRole = 'Co-Host';
-  else if (!isAssistant) viewerRole = 'Assistant';
+  else if (isAssistant) {
+    const ownRole = shiftRows.find((row) => viewerIdentities.has(norm(row.staff_name)));
+    viewerRole = ownRole ? currentShiftRole(ownRole) : 'Assistant';
+  }
 
   // ── SECURITY: only host/co-hosts/assistants on THIS session (or the real
   // signed-in admin, for support access) may view or edit the panel. Without
@@ -244,18 +261,10 @@ export default async function SessionOngoingPage({
     };
   }
 
-  function shiftRole(role: string): StaffShiftRow['role'] {
-    if (isInternalHelperRole(role)) return 'Internal Helper';
-    if (role.startsWith('CH_')) return 'Co-Host';
-    if (role.startsWith('AST_1')) return 'Main AST';
-    return 'Assistant';
-  }
-
-  const durableStaffShift: StaffShiftRow[] = (staffRows ?? [])
-    .filter((row) => !(row.role === 'HOST' || row.role.startsWith('HOST,')))
+  const durableStaffShift: StaffShiftRow[] = shiftRows
     .map((row) => ({
       sourceRowId: row.staff_row_id,
-      role: shiftRole(row.role),
+      role: currentShiftRole(row),
       discord: row.staff_name,
       notes: row.notes ?? '',
       attended: Boolean(row.attended),

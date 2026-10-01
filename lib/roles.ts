@@ -75,7 +75,7 @@ export function getAllCards(myLiveSessionId: number | null): Record<CardKey, Ben
   return {
     booking:      { key: 'booking', label: 'Manage Session(s)', sub: 'Manager & Head Staff', icon: '/images/icons/OM.png', href: '/managesession' },
     setup:        { key: 'setup', label: 'Session Setup', sub: 'Head-Staff', icon: '/images/icons/HS.png', href: '/setupsesh'},
-    feedback:     { key: 'feedback', label: 'Feedback', sub: 'Co-Host Authorized+', icon: '/images/icons/ST.png', href: '/feedback', wip: true },
+    feedback:     { key: 'feedback', label: 'Trainer Feedback', sub: 'Operations · Co-Host Authorized', icon: '/images/icons/ST.png', href: '/feedbacktrainer' },
     my_session:   { key: 'my_session', label: 'Session Panel', sub: 'All Staff (depending on your role)', icon: '/images/icons/ST.png', href: `/sessionongoing?session_id=${myLiveSessionId ?? ''}`},
     manage_events: { key: 'manage_events', label: 'Manage Events', sub: 'Event Authorized+', icon: '/images/icons/ST.png', href: '/manageevents', wip: true },
     events:       { key: 'events', label: 'Events', sub: '', icon: 'book', href: '/events', wip: true },

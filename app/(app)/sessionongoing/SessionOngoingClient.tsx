@@ -18,6 +18,7 @@ import { ICONS, type IconKey } from '@/lib/icons';
 import { useSessionRealtime } from '@/lib/supabase/useSessionRealtime';
 import { useBellRealtime } from '@/lib/supabase/useBellRealtime';
 import { useAnnouncementBroadcast } from '@/lib/supabase/useAnnouncementBroadcast';
+import { useSessionActivityBroadcast } from '@/lib/supabase/useSessionActivityBroadcast';
 import ToastStack, { type ToastEntry, type ToastKind } from '@/components/ToastStack';
 import { useLiveSessionActions } from '../LiveSessionContext';
 import { ZONE_DATA, ZONES, ANNOUNCEMENT_TEMPLATE, SCRIPT_LINES, STATION_LIST, buildStationAnnouncement, STAFF_ROLES, buildReportText } from '@/lib/session/constants';
@@ -28,6 +29,9 @@ import type {
 } from '@/types/session';
 import styles from './sessionongoing.module.css';
 import { formatInstantInSiteTimezone, type SiteTimezoneMode } from '@/lib/siteTimezone';
+import { countSessionTraineeSlots, isWithinSessionTraineeLimit, MAX_SESSION_TRAINEES, SESSION_TRAINEE_LIMIT_MESSAGE } from '@/lib/session/traineeLimit';
+import FeedbackImages, { type FeedbackImage } from './FeedbackImages';
+import { getSessionControlAccess } from '@/lib/session/controlPermissions';
 
 const TRAINEE_COLUMNS = [
   { n: 1, label: 'Pop-out', minWidth: 70, maxWidth: 80, width: 74 },
@@ -203,15 +207,15 @@ function ScriptPreview({
 
 const OVERRIDE_LABELS: Record<keyof OverridesState, string> = {
   'session-details': 'Override Session Details',
-  trainees: 'Override Trainees',
-  'staff-roles': 'Assistant Staff Role Override',
-  'drivers-disable': 'Assistant Driver Input',
+  trainees: 'Enable Add/Delete Trainees',
+  'staff-roles': 'Allow Main AST Override Staff Roles',
+  'drivers-disable': 'Disable Assistant Input on Drivers',
   'slot-order': 'Override Slot Ordering',
-  'staff-delete': 'Staff Deletion Override',
+  'staff-delete': 'Override Staff Deletion',
   'trainee-details': 'Override Trainee Details',
-  'trainer-details': 'Trainer Assignment Override',
-  'staff-addition': 'Staff Addition',
-  'allow-all': 'Override for Everyone',
+  'trainer-details': 'Override Trainer Assignment',
+  'staff-addition': 'Allow Staff Addition',
+  'allow-all': 'Allow Override for Everyone',
 };
 
 function SessionElapsedClock({
@@ -363,7 +367,6 @@ export default function SessionOngoingClient(props: Props) {
 
   const myRole: MyRole = viewerRole === 'Host' ? 'host' : viewerRole === 'Co-Host' ? 'cohost' : 'assistant';
   const isHost = myRole === 'host';
-  const isAssistant = myRole === 'assistant';
   const sessionId = initialSession.session_id;
   const initialLiveState = initialSession.live_state ?? {};
   const initialAllocatedRows = Array.from({ length: initialSession.num_slots || 10 }, (_, i) => String(i));
@@ -385,7 +388,28 @@ export default function SessionOngoingClient(props: Props) {
   const [timers, setTimers] = useState<Record<string, TimerState>>(initialLiveState.timers ?? {});
   const [drivers, setDrivers] = useState<DriverRow[]>(initialLiveState.drivers ?? []);
   const [staffShift, setStaffShift] = useState<StaffShiftRow[]>(initialLiveState.staffShift ?? []);
+  const isMainAst = useMemo(() => staffShift.some((member) =>
+    member.role === 'Main AST' && member.discord.trim().toLowerCase() === myDisplayName.trim().toLowerCase()
+  ), [staffShift, myDisplayName]);
+  const isInternalHelper = useMemo(() => staffShift.some((member) =>
+    member.role === 'Internal Helper' && member.discord.trim().toLowerCase() === myDisplayName.trim().toLowerCase()
+  ), [staffShift, myDisplayName]);
+  const myShiftRoles = staffShift.filter((member) =>
+    member.discord.trim().toLowerCase() === myDisplayName.trim().toLowerCase()
+  );
+  const isCoHost = myShiftRoles.length > 0
+    ? myShiftRoles.some((member) => member.role === 'Co-Host')
+    : myRole === 'cohost';
+  const isAssistant = !isHost && !isCoHost;
+  const controlAccess = getSessionControlAccess(overrides, {
+    host: isHost, coHost: isCoHost, mainAst: isMainAst, internalHelper: isInternalHelper,
+  });
   const [feedbackData, setFeedbackData] = useState<FeedbackDataMap>(initialLiveState.feedbackData ?? {});
+  const [feedbackImages, setFeedbackImages] = useState<Record<string, FeedbackImage[]>>({});
+  const [imageUploading, setImageUploading] = useState(false);
+  const imageUploadingRef = useRef(false);
+  const [draftReady, setDraftReady] = useState(false);
+  const draftKey = `session-feedback-draft:${sessionId}:${props.staffId}`;
   const [completedRows, setCompletedRows] = useState<Record<string, boolean>>(initialLiveState.completedRows ?? {});
   const [unallocated, setUnallocated] = useState<UnallocatedTrainee[]>(initialLiveState.unallocatedTrainees ?? []);
   const [timeTracker, setTimeTracker] = useState<TimeTracker>(initialLiveState.timeTracker ?? {});
@@ -466,6 +490,7 @@ export default function SessionOngoingClient(props: Props) {
     attendance: false,
     traineeRows: new Set<string>(),
   });
+  const lastActivityBroadcastAtRef = useRef(0);
   const changeVersionRef = useRef(0);
   const savePromiseRef = useRef<Promise<boolean> | null>(null);
   const lastSyncErrorRef = useRef<{ message: string; at: number } | null>(null);
@@ -478,6 +503,70 @@ export default function SessionOngoingClient(props: Props) {
     // debounced request and Supabase realtime round trip complete.
     reportActive(true);
   }, [reportActive]);
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      try {
+        const raw = localStorage.getItem(draftKey);
+        if (raw) {
+          const draft = JSON.parse(raw) as { savedAt?: number; feedbackData?: FeedbackDataMap; images?: Record<string, FeedbackImage[]> };
+          const serverTime = initialSession.last_updated ? new Date(initialSession.last_updated).getTime() : 0;
+          if (draft.feedbackData && (draft.savedAt ?? 0) > serverTime) {
+            setFeedbackData((current) => ({ ...current, ...draft.feedbackData }));
+            queueSync('feedbackData');
+          }
+          if (draft.images) setFeedbackImages(draft.images);
+        }
+      } catch { /* Damaged browser storage must not block feedback. */ }
+      setDraftReady(true);
+    });
+    fetch(`/api/session/${sessionId}/feedback-images`)
+      .then((response) => response.ok ? response.json() : null)
+      .then((result: { success?: boolean; images?: FeedbackImage[] } | null) => {
+        if (!active || !result?.success || !result.images) return;
+        const byRow: Record<string, FeedbackImage[]> = {};
+        for (const image of result.images) {
+          if (image.slot_number != null) (byRow[String(image.slot_number - 1)] ??= []).push(image);
+        }
+        setFeedbackImages(byRow);
+      }).catch(() => {});
+    return () => { active = false; };
+    // Restore only once for this session; live updates follow the existing sync path.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+  useEffect(() => {
+    if (!draftReady) return;
+    try { localStorage.setItem(draftKey, JSON.stringify({ savedAt: Date.now(), feedbackData, images: feedbackImages })); }
+    catch { /* Server state still persists when browser storage is full. */ }
+  }, [draftKey, draftReady, feedbackData, feedbackImages]);
+  useEffect(() => {
+    let confirmedNavigation = false;
+    const hasUnsavedFeedback = () => dirtyRef.current.liveFields.has('feedbackData') || imageUploadingRef.current;
+    const warnIfUnsaved = (event: BeforeUnloadEvent) => {
+      if (confirmedNavigation || !hasUnsavedFeedback()) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    const warnOnInternalLink = (event: MouseEvent) => {
+      if (!hasUnsavedFeedback() || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      const link = event.target instanceof Element ? event.target.closest('a[href]') as HTMLAnchorElement | null : null;
+      if (!link || link.target === '_blank') return;
+      const destination = new URL(link.href);
+      if (destination.pathname === window.location.pathname && destination.search === window.location.search) return;
+      if (!window.confirm('Feedback changes or image uploads have not finished saving. Leave this page?')) event.preventDefault();
+      else {
+        confirmedNavigation = true;
+        window.setTimeout(() => { confirmedNavigation = false; }, 1000);
+      }
+    };
+    window.addEventListener('beforeunload', warnIfUnsaved);
+    document.addEventListener('click', warnOnInternalLink, true);
+    return () => {
+      window.removeEventListener('beforeunload', warnIfUnsaved);
+      document.removeEventListener('click', warnOnInternalLink, true);
+    };
+  }, []);
   const traineeCountRef = useRef(initialSession.num_slots || 10);
 
   // ── trainee rows: allocated (1..num_slots) + unallocated, mirrors renumberSlots/addTraineeRow ──
@@ -491,6 +580,7 @@ export default function SessionOngoingClient(props: Props) {
   const standbyRows = useMemo(() => standbySlots.map((slot) => String(slot - 1)), [standbySlots]);
   const [rowOrder, setRowOrder] = useState<string[]>(initialRowOrder);
   const allTraineeRows = useMemo(() => [...rowOrder, ...standbyRows], [rowOrder, standbyRows]);
+  const traineeSlotCount = countSessionTraineeSlots(allocatedRows.length, standbyRows.length, unallocated.length);
   useEffect(() => {
     // keep rowOrder in sync if num_slots changes (rows added/removed) —
     // append any new rows, drop any that no longer exist
@@ -560,6 +650,10 @@ export default function SessionOngoingClient(props: Props) {
     setToasts((current) => [...current.slice(-3), { id, message, kind, actorName }]);
     window.setTimeout(() => dismissToast(id), 10_000);
   }, [dismissToast, myDisplayName, viewerRole]);
+  const { send: sendSessionActivity } = useSessionActivityBroadcast(sessionId, (activity) => {
+    if (activity.clientId === myClientId) return;
+    showToast('Updated the session.', 'info', activity.actorName);
+  });
   const copyWithFeedback = useCallback(async (key: string, text: string, label: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -802,6 +896,15 @@ export default function SessionOngoingClient(props: Props) {
         }
         lastSyncErrorRef.current = null;
         consecutiveSyncFailuresRef.current = 0;
+        const now = Date.now();
+        if (now - lastActivityBroadcastAtRef.current >= 8000) {
+          lastActivityBroadcastAtRef.current = now;
+          sendSessionActivity({
+            id: `${myClientId}:${now}`,
+            clientId: myClientId,
+            actorName: myDisplayName || viewerRole,
+          });
+        }
         return true;
       } catch (error) {
         consecutiveSyncFailuresRef.current += 1;
@@ -824,7 +927,7 @@ export default function SessionOngoingClient(props: Props) {
     } finally {
       if (savePromiseRef.current === operation) savePromiseRef.current = null;
     }
-  }, [allTraineeRows, sessionId, showToast]);
+  }, [allTraineeRows, myClientId, myDisplayName, sendSessionActivity, sessionId, showToast, viewerRole]);
 
   useEffect(() => {
     const id = setInterval(() => { void pushState(); }, 1500);
@@ -843,7 +946,7 @@ export default function SessionOngoingClient(props: Props) {
   // ── signal time apply — replaces applySignalMinutes(): pushes the new
   // per-trainee countdown length and resets every non-running row to it ──
   const applySignalTime = useCallback(() => {
-    const unlocked = overrides['allow-all'] || overrides['session-details'];
+    const unlocked = controlAccess.sessionDetails;
     if (!unlocked) return;
     const minutes = Math.max(1, Math.min(60, parseInt(String(session.trainee_timer), 10) || 12));
     setSession((s) => ({ ...s, trainee_timer: minutes }));
@@ -857,7 +960,7 @@ export default function SessionOngoingClient(props: Props) {
     dirtyRef.current.details = true;
     queueSync('timers');
     showToast(`Signal time set to ${minutes} minutes for all trainees.`);
-  }, [overrides, session.trainee_timer, queueSync, showToast]);
+  }, [controlAccess.sessionDetails, session.trainee_timer, queueSync, showToast]);
 
   // ── overrides ──
   const toggleOverride = useCallback(async (key: keyof OverridesState) => {
@@ -877,24 +980,18 @@ export default function SessionOngoingClient(props: Props) {
 
   const allowAll = overrides['allow-all'];
   const locked = {
-    sessionDetails: !(allowAll || overrides['session-details']),
-    trainees: !(allowAll || overrides.trainees),
-    traineeDetails: !(allowAll || overrides['trainee-details']),
-    trainerDetails: !(allowAll || overrides['trainer-details']),
-    staffRoles: !(allowAll || overrides['staff-roles']),
-    driversDisabled: !allowAll && overrides['drivers-disable'],
-    slotOrder: !(allowAll || overrides['slot-order']),
-    staffDelete: !(allowAll || (isHost && overrides['staff-delete'])),
+    sessionDetails: !controlAccess.sessionDetails,
+    trainees: !controlAccess.trainees,
+    traineeDetails: !(controlAccess.traineeDetails || controlAccess.trainees),
+    trainerDetails: !controlAccess.trainerDetails,
+    staffRoles: !controlAccess.staffRoles,
+    driversDisabled: !controlAccess.drivers,
+    slotOrder: !controlAccess.slotOrder,
+    staffDelete: !controlAccess.staffDelete,
   };
-  const isMainAst = useMemo(() => staffShift.some((member) =>
-    member.role === 'Main AST' && member.discord.trim().toLowerCase() === myDisplayName.trim().toLowerCase()
-  ), [staffShift, myDisplayName]);
-  const isInternalHelper = useMemo(() => staffShift.some((member) =>
-    member.role === 'Internal Helper' && member.discord.trim().toLowerCase() === myDisplayName.trim().toLowerCase()
-  ), [staffShift, myDisplayName]);
   const canSeeTimeTracker = isHost || isMainAst || isInternalHelper;
   const canSeeMainAstNotes = isHost || isMainAst || isInternalHelper;
-  const canAddStaff = allowAll || (overrides['staff-addition'] && (isHost || isMainAst));
+  const canAddStaff = controlAccess.staffAddition;
   const trainerOptions = useMemo(() => {
     const seen = new Set<string>();
     return [
@@ -926,7 +1023,7 @@ export default function SessionOngoingClient(props: Props) {
     const rows = Object.keys(completedRows);
     return rows.length > 0 && rows.every((r) => completedRows[r]);
   }, [completedRows]);
-  const statusUnlocked = allowAll || overrides['session-details'] || allDone || isHost;
+  const statusUnlocked = allowAll || isHost || ((isCoHost || isInternalHelper) && (overrides['session-details'] || allDone));
 
   // ── trainee timer controls (replace toggleTimer/resetTimer/setTimerValue/recordSetupDone) ──
   const warnedTimerThresholdsRef = useRef(new Set<string>());
@@ -1156,10 +1253,14 @@ export default function SessionOngoingClient(props: Props) {
 
   const addUnallocatedTrainee = useCallback(() => {
     if (locked.trainees) return;
+    if (!isWithinSessionTraineeLimit(traineeSlotCount, 1)) {
+      showToast(SESSION_TRAINEE_LIMIT_MESSAGE, 'warning');
+      return;
+    }
     setUnallocated((prev) => [...prev, { uid: newUid(), discord: '', discordId: '', roblox: '', zone: '', notes: '', trainerName: '' }]);
     queueSync('unallocatedTrainees');
     showToast('Unallocated trainee added.', 'success');
-  }, [locked.trainees, queueSync, showToast]);
+  }, [locked.trainees, queueSync, showToast, traineeSlotCount]);
 
   const toggleComplete = useCallback((row: string) => {
     if (isAssistant) return;
@@ -1175,6 +1276,54 @@ export default function SessionOngoingClient(props: Props) {
     setFeedbackData((prev) => ({ ...prev, [row]: { ...getFeedback(row), [field]: value } }));
     queueSync('feedbackData');
   }, [getFeedback, queueSync]);
+  const uploadFeedbackImage = useCallback(async (row: string, file: File) => {
+    imageUploadingRef.current = true;
+    setImageUploading(true);
+    let reservationId: string | null = null;
+    try {
+      const endpoint = `/api/session/${sessionId}/feedback-images`;
+      const prepared = await fetch(endpoint, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'prepare', slot_number: Number(row) + 1, file_name: file.name, content_type: file.type, size_bytes: file.size }),
+      });
+      const reservation = await prepared.json() as { success?: boolean; message?: string; id?: string };
+      if (!prepared.ok || !reservation.success || !reservation.id) throw new Error(reservation.message || 'Could not prepare upload.');
+      reservationId = reservation.id;
+      const form = new FormData();
+      form.set('id', reservationId);
+      form.set('image', file);
+      const response = await fetch(endpoint, { method: 'POST', body: form });
+      const result = await response.json() as { success?: boolean; message?: string; image?: FeedbackImage };
+      if (!response.ok || !result.success || !result.image) throw new Error(result.message || 'Could not save image.');
+      reservationId = null;
+      setFeedbackImages((current) => ({ ...current, [row]: [...(current[row] ?? []), result.image!] }));
+    } catch (error) {
+      if (reservationId) void fetch(`/api/session/${sessionId}/feedback-images`, {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: reservationId }),
+      }).catch(() => {});
+      showToast(error instanceof Error ? error.message : 'Upload failed.', 'error');
+    } finally {
+      imageUploadingRef.current = false;
+      setImageUploading(false);
+    }
+  }, [sessionId, showToast]);
+  const removeFeedbackImage = useCallback(async (row: string, id: string) => {
+    imageUploadingRef.current = true;
+    setImageUploading(true);
+    try {
+      const response = await fetch(`/api/session/${sessionId}/feedback-images`, {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+      });
+      const result = await response.json() as { success?: boolean; message?: string };
+      if (!response.ok || !result.success) throw new Error(result.message || 'Remove failed.');
+      setFeedbackImages((current) => ({ ...current, [row]: (current[row] ?? []).filter((image) => image.id !== id) }));
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Remove failed.', 'error');
+    } finally {
+      imageUploadingRef.current = false;
+      setImageUploading(false);
+    }
+  }, [sessionId, showToast]);
 
   // Builds the same formatted feedback message the modal's "Copy" button
   // produces — ported from buildFeedbackMessageForRow() in the original.
@@ -1214,10 +1363,14 @@ ${fb.overall || ''}
 
 __*Notes/Advice*__
 ${fb.notes || ''}
+${(feedbackImages[row] ?? []).length ? `
+__**Reference images**__
+${(feedbackImages[row] ?? []).map((image, index) => `${index + 1}. ${image.url}`).join('\n')}
+` : ''}
 
 If you believe you were unfairly assessed or have any additional questions, feel free to ask!
 Thank you for attending.`;
-  }, [traineeDetails, buildTraineeDetail, session, getFeedback, timers, timezoneMode]);
+  }, [traineeDetails, buildTraineeDetail, session, getFeedback, timers, timezoneMode, feedbackImages]);
 
   // ── bell system (replaces ringBell/ackBell/pollBell) ──
   const ringBell = useCallback(async (role: 'host' | 'cohost') => {
@@ -1326,6 +1479,7 @@ Thank you for attending.`;
   // ── conclude session (replaces #conclude-session-btn handler) ──
   const [concludeOpen, setConcludeOpen] = useState(false);
   const concludeSession = useCallback(async () => {
+    if (imageUploadingRef.current) { showToast('Wait for the image upload to finish before concluding.', 'warning'); return; }
     const incomplete = allocatedRows.filter((r) => !completedRows[r]);
     let html = `You're about to conclude this session. This finalizes the session record — the status will be set to Concluded and it can no longer be edited as an active session.`;
     if (statusValue === 'cancelled') html += `\n\nIf the session status is currently Cancelled, concluding it will record the session as cancelled-and-concluded — make sure that's intended.`;
@@ -1344,9 +1498,10 @@ Thank you for attending.`;
     }).then((r) => r.json());
 
     if (!result.success) { showToast('Failed to conclude: ' + (result.message || 'Unknown error')); return; }
+    localStorage.removeItem(draftKey);
     showToast('Session concluded and archived. Redirecting...');
     setTimeout(() => { window.location.href = '/dashboard'; }, 2000);
-  }, [allocatedRows, completedRows, statusValue, showConfirm, pushState, sessionId, showToast]);
+  }, [allocatedRows, completedRows, statusValue, showConfirm, pushState, sessionId, showToast, draftKey]);
 
   const concludeUnlocked = isHost && (statusValue === 'cancelled' || statusValue === 'concluded');
 
@@ -1418,7 +1573,7 @@ Thank you for attending.`;
                   <FontAwesomeIcon icon={ICONS.lock} /> Override Session Details
                 </button>
                 <button className={`${styles.ovrBtn} ${overrides.trainees ? styles.on : ''}`} onClick={() => toggleOverride('trainees')}>
-                  <FontAwesomeIcon icon={ICONS.userPlus} /> Override Trainees
+                  <FontAwesomeIcon icon={ICONS.userPlus} /> Enable Add/Delete Trainees
                 </button>
                 <button className={`${styles.ovrBtn} ${overrides['trainee-details'] ? styles.on : ''}`} onClick={() => toggleOverride('trainee-details')}>
                   <FontAwesomeIcon icon={ICONS.idCard} /> Override Trainee Details
@@ -1430,7 +1585,7 @@ Thank you for attending.`;
               <div className={styles.overrideCol}>
                 <div className={styles.overrideGroupTitle}>Assistant Control</div>
                 <button className={`${styles.ovrBtn} ${overrides['staff-roles'] ? styles.on : ''}`} onClick={() => toggleOverride('staff-roles')}>
-                  <FontAwesomeIcon icon={ICONS.userShield} /> Allow Assistant Override Staff Roles
+                  <FontAwesomeIcon icon={ICONS.userShield} /> Allow Main AST Override Staff Roles
                 </button>
                 <button className={`${styles.ovrBtn} ${overrides['drivers-disable'] ? styles.on : ''}`} onClick={() => toggleOverride('drivers-disable')}>
                   <FontAwesomeIcon icon={ICONS.ban} /> Disable Assistant Input on Drivers
@@ -1441,8 +1596,8 @@ Thank you for attending.`;
                 <button className={`${styles.ovrBtn} ${overrides['trainer-details'] ? styles.on : ''}`} onClick={() => toggleOverride('trainer-details')}>
                   <FontAwesomeIcon icon={ICONS.chalkboardUser} /> Override Trainer Assignment
                 </button>
-                <button className={`${styles.ovrBtn} ${styles.hostOnly} ${overrides['staff-delete'] ? styles.on : ''}`} onClick={() => toggleOverride('staff-delete')}>
-                  <FontAwesomeIcon icon={ICONS.userSlash} /> Override Staff Deletion (Host only)
+                <button className={`${styles.ovrBtn} ${overrides['staff-delete'] ? styles.on : ''}`} onClick={() => toggleOverride('staff-delete')}>
+                  <FontAwesomeIcon icon={ICONS.userSlash} /> Override Staff Deletion
                 </button>
                 <button
                   className={`${styles.ovrBtn} ${overrides['staff-addition'] ? styles.on : ''}`}
@@ -1847,6 +2002,7 @@ Thank you for attending.`;
                           <textarea
                             className={styles.cellInput}
                             rows={1}
+                            disabled={locked.traineeDetails}
                             value={detail.notes}
                             onChange={(e) => updateTraineeDetail(row, { notes: e.target.value })}
                           />
@@ -1917,12 +2073,29 @@ Thank you for attending.`;
                         </select>
                       </td>
                     )}
-                    {[7, 8, 9, 10, 11, 12, 13].map((n) => !hiddenCols.has(n) && <td key={n} />)}
+                    {[7, 8, 9].map((n) => !hiddenCols.has(n) && <td key={n} />)}
+                    {!hiddenCols.has(10) && (
+                      <td>
+                        <select
+                          className={styles.cellInput}
+                          disabled={locked.trainerDetails}
+                          data-lock-reason="Trainer assignment is locked. Ask the Host to enable Override Trainer Assignment."
+                          value={trainerOptions.find((name) => name.toLowerCase() === (u.trainerName ?? '').trim().toLowerCase()) ?? ''}
+                          onChange={(e) => { setUnallocated((prev) => prev.map((x) => x.uid === u.uid ? { ...x, trainerName: e.target.value } : x)); queueSync('unallocatedTrainees'); }}
+                        >
+                          <option value="">— None —</option>
+                          {trainerOptions.map((name) => <option key={name.toLowerCase()} value={name}>{name}</option>)}
+                        </select>
+                      </td>
+                    )}
+                    {!hiddenCols.has(11) && <td><input className={styles.cellInput} readOnly disabled value={staffDirectory[u.trainerName] ?? ''} /></td>}
+                    {[12, 13].map((n) => !hiddenCols.has(n) && <td key={n} />)}
                     {!hiddenCols.has(14) && (
                       <td>
                         <textarea
                           className={styles.cellInput}
                           rows={1}
+                          disabled={locked.traineeDetails}
                           value={u.notes}
                           onChange={(e) => { setUnallocated((prev) => prev.map((x) => x.uid === u.uid ? { ...x, notes: e.target.value } : x)); queueSync('unallocatedTrainees'); }}
                         />
@@ -1950,9 +2123,14 @@ Thank you for attending.`;
             </table>
           </div>
           <div className={styles.addRowBar}>
+            <span style={{ alignSelf: 'center', color: 'rgba(255,255,255,.45)', fontSize: '.72rem' }}>
+              {traineeSlotCount}/{MAX_SESSION_TRAINEES} total trainee slots
+            </span>
             <button
               className={`${styles.addBtn} ${locked.trainees ? styles.locked : ''}`}
-              onClick={() => lockedClick(locked.trainees, 'This requires the Override Trainees toggle. Ask the host to enable it.', addUnallocatedTrainee)}
+              disabled={traineeSlotCount >= MAX_SESSION_TRAINEES}
+              title={traineeSlotCount >= MAX_SESSION_TRAINEES ? SESSION_TRAINEE_LIMIT_MESSAGE : undefined}
+              onClick={() => lockedClick(locked.trainees, 'This requires Enable Add/Delete Trainees and a permitted session role.', addUnallocatedTrainee)}
             >
               <FontAwesomeIcon icon={ICONS.plus} /> Add unallocated trainee
             </button>
@@ -1982,14 +2160,14 @@ Thank you for attending.`;
                           showToast(`${d.discord || 'Driver'} marked ${attended ? 'present' : 'absent'}.`, attended ? 'success' : 'warning');
                         }} />
                     </td>
-                    <td><button className={styles.rowDelBtn} onClick={() => { setDrivers((p) => p.filter((_, j) => j !== i)); queueSync('drivers'); showToast(`${d.discord || 'Driver'} removed.`, 'success'); }}><FontAwesomeIcon icon={ICONS.trash} /></button></td>
+                    <td><button className={styles.rowDelBtn} disabled={locked.driversDisabled} onClick={() => { setDrivers((p) => p.filter((_, j) => j !== i)); queueSync('drivers'); showToast(`${d.discord || 'Driver'} removed.`, 'success'); }}><FontAwesomeIcon icon={ICONS.trash} /></button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
             </div>
             <div className={styles.addRowBar}>
-              <button className={styles.addBtn} onClick={() => { setDrivers((p) => [...p, { discord: '', roblox: '', attended: false }]); queueSync('drivers'); showToast('Driver added.', 'success'); }}>
+              <button className={styles.addBtn} disabled={locked.driversDisabled} onClick={() => { setDrivers((p) => [...p, { discord: '', roblox: '', attended: false }]); queueSync('drivers'); showToast('Driver added.', 'success'); }}>
                 <FontAwesomeIcon icon={ICONS.plus} /> Add driver
               </button>
             </div>
@@ -2004,13 +2182,13 @@ Thank you for attending.`;
                 {staffShift.map((s, i) => (
                   <tr key={i}>
                     <td>
-                      <select className={styles.cellInput} disabled={locked.staffRoles} data-lock-reason="Staff roles are locked. Ask the Host to enable Allow Assistant Override Staff Roles." value={s.role}
+                      <select className={styles.cellInput} disabled={locked.staffRoles} data-lock-reason="Staff roles are locked. Ask the Host to enable Allow Main AST Override Staff Roles." value={s.role}
                         onChange={(e) => { setStaffShift((p) => p.map((x, j) => j === i ? { ...x, role: e.target.value as StaffShiftRow['role'] } : x)); queueSync('staffShift'); }}>
                         {STAFF_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                       </select>
                     </td>
                     <td>
-                      <select className={styles.cellInput} value={s.discord}
+                      <select className={styles.cellInput} disabled={Boolean(s.sourceRowId) && !controlAccess.staffRoles && !allowAll} value={s.discord}
                         onChange={(e) => { setStaffShift((p) => p.map((x, j) => j === i ? { ...x, discord: e.target.value } : x)); queueSync('staffShift'); }}>
                         <option value="">— Select —</option>
                         {(s.role === 'Co-Host' ? eligibleStaff['Co-Host'] : s.role === 'Assistant' ? eligibleStaff.Assistant : Object.keys(staffDirectory)).map((n) => <option key={n} value={n}>{n}</option>)}
@@ -2045,8 +2223,8 @@ Thank you for attending.`;
                     showToast('Staff addition is disabled by the Host.', 'warning');
                     return;
                   }
-                  if (!allowAll && !isHost && !isMainAst) {
-                    showToast('Only the Host or the current Main AST can add staff.', 'warning');
+                  if (!canAddStaff) {
+                    showToast('Only the Host or an Internal Helper can add staff when this control is enabled.', 'warning');
                     return;
                   }
                   if (staffShift.length >= 10) {
@@ -2188,6 +2366,7 @@ Thank you for attending.`;
                   timezoneMode,
                   hostName: session.host,
                   sessionDateIso: session.session_date,
+                  sessionTime: session.session_time,
                   timeTracker,
                   mainAst,
                   assistants,
@@ -2486,9 +2665,20 @@ Thank you for attending.`;
                   </div>
                 </div>
 
+                <FeedbackImages images={feedbackImages[row] ?? []} busy={imageUploading}
+                  onAdd={(file) => uploadFeedbackImage(row, file)}
+                  onRemove={(id) => removeFeedbackImage(row, id)}
+                  onError={(message) => showToast(message, 'warning')} />
+
                 <div className={styles.modalFooter}>
                   <button className={styles.mbtn} onClick={() => setFeedbackModalRow(null)}>Cancel</button>
-                  <button className={styles.mbtnPrimary} onClick={() => setFeedbackModalRow(null)}>Save feedback</button>
+                  <button className={styles.mbtnPrimary} onClick={async () => {
+                    if (imageUploadingRef.current) { showToast('Wait for the image upload to finish.', 'warning'); return; }
+                    if (!await pushState()) return;
+                    if (dirtyRef.current.liveFields.has('feedbackData') && !await pushState()) return;
+                    if (!dirtyRef.current.liveFields.has('feedbackData')) localStorage.removeItem(draftKey);
+                    setFeedbackModalRow(null);
+                  }}>Save feedback</button>
                 </div>
               </div>
             </div>
@@ -2638,6 +2828,10 @@ Thank you for attending.`;
                     </div>
                   ))}
                 </div>
+                <FeedbackImages images={feedbackImages[row] ?? []} busy={imageUploading}
+                  onAdd={(file) => uploadFeedbackImage(row, file)}
+                  onRemove={(id) => removeFeedbackImage(row, id)}
+                  onError={(message) => showToast(message, 'warning')} />
               </div>
 
 

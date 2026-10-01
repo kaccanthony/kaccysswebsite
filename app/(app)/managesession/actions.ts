@@ -7,6 +7,7 @@ import { getCurrentUser } from '@/lib/getCurrentUser';
 import { createClient } from '@/utils/supabase/server';
 import { buildStaffRowsFromForm, buildTraineeRowsFromForm, replaceSessionChildren } from '@/lib/sessionStaffTrainees';
 import { findDuplicateAssignments } from './duplicateAssignments';
+import { isWithinSessionTraineeLimit, SESSION_TRAINEE_LIMIT_MESSAGE } from '@/lib/session/traineeLimit';
 import {
   canManageSiteTimezone,
   parseSiteTimezone,
@@ -90,6 +91,10 @@ export async function saveSession(formData: FormData): Promise<SessionActionResu
   const numSlots = parseInt((formData.get('num_slots') as string) || '0', 10);
   const reservedSlots = Math.max(0, Math.min(10, parseInt((formData.get('reserved_slots') as string) || '0', 10) || 0));
 
+  if (!Number.isSafeInteger(numSlots) || numSlots < 0 || !isWithinSessionTraineeLimit(numSlots, reservedSlots)) {
+    return failure(SESSION_TRAINEE_LIMIT_MESSAGE);
+  }
+
   if (findDuplicateAssignments(formData).size > 0) {
     return failure('Remove duplicate staff or trainee identity assignments in this session before saving.');
   }
@@ -120,13 +125,13 @@ export async function saveSession(formData: FormData): Promise<SessionActionResu
     session_duration: (formData.get('session_duration') as string) || '',
     num_slots: numSlots,
     trainee_timer: parseInt((formData.get('trainee_timer') as string) || '15', 10),
-    trainer_assignment_mode: (formData.get('trainer_assignment_mode') as string) || 'auto',
     session_date: sessionDate,
     session_time: sessionTime,
     additional_notes: (formData.get('additional_notes') as string) || null,
   };
 
   let sessionId: number;
+  let existingTrainerNames = new Map<number, string | null>();
 
   if (action === 'add') {
     const customIdRaw = formData.get('custom_session_id') as string;
@@ -142,7 +147,9 @@ export async function saveSession(formData: FormData): Promise<SessionActionResu
       }
     }
 
-    const insertPayload = customId ? { session_id: customId, ...sessionRow } : sessionRow;
+    const insertPayload = customId
+      ? { session_id: customId, trainer_assignment_mode: 'auto', ...sessionRow }
+      : { trainer_assignment_mode: 'auto', ...sessionRow };
     const { data: inserted, error } = await supabase.from('session_upcoming').insert(insertPayload).select('session_id').single();
     if (error || !inserted) return failure(error?.message ?? 'Could not create session.');
     sessionId = inserted.session_id;
@@ -155,6 +162,11 @@ export async function saveSession(formData: FormData): Promise<SessionActionResu
     sessionId = parseInt(formData.get('session_id') as string, 10);
     if (!sessionId) return failure('Missing session ID.');
 
+    const { data: assignedTrainers, error: trainerError } = await supabase
+      .from('session_trainees').select('slot_number, trainer_name').eq('session_id', sessionId);
+    if (trainerError) return failure(trainerError.message);
+    existingTrainerNames = new Map((assignedTrainers ?? []).map((row) => [row.slot_number, row.trainer_name]));
+
     const { error } = await supabase.from('session_upcoming').update(sessionRow).eq('session_id', sessionId);
     if (error) return failure(error.message);
   }
@@ -165,7 +177,10 @@ export async function saveSession(formData: FormData): Promise<SessionActionResu
   const staffRows = pendingStaffRows.map((row) => ({ ...row, session_id: sessionId }));
 
   // ── Replace session_trainees for this session entirely ──
-  const traineeRows = buildTraineeRowsFromForm(formData, sessionId, numSlots, reservedSlots);
+  const traineeRows = buildTraineeRowsFromForm(formData, sessionId, numSlots, reservedSlots).map((row) => ({
+    ...row,
+    trainer_name: existingTrainerNames.get(row.slot_number) ?? null,
+  }));
 
   try {
     await replaceSessionChildren(supabase, sessionId, staffRows, traineeRows);

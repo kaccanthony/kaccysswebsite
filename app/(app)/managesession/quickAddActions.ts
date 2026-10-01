@@ -4,13 +4,13 @@
 import { revalidatePath } from 'next/cache';
 import { getCurrentUser } from '@/lib/getCurrentUser';
 import { createClient } from '@/utils/supabase/server';
+import { isWithinSessionTraineeLimit, SESSION_TRAINEE_LIMIT_MESSAGE } from '@/lib/session/traineeLimit';
 
 export interface QuickAddTraineeInput {
   robloxUsername: string;
   discordUsername: string;
   discordId: string;
   zone?: string;
-  trainerName?: string;
   note?: string;
 }
 
@@ -30,14 +30,19 @@ export async function quickAddTrainee(
     .single();
   if (!session) return { error: 'Session not found.' };
 
-  const { data: existing } = await supabase
+  const { data: existing, error: existingError } = await supabase
     .from('session_trainees')
-    .select('slot_number')
+    .select('slot_number, is_standby')
     .eq('session_id', sessionId)
-    .order('slot_number', { ascending: false })
-    .limit(1);
+    .order('slot_number', { ascending: true });
+  if (existingError) return { error: 'Could not verify the session trainee limit. Please try again.' };
 
-  const nextSlot = (existing?.[0]?.slot_number ?? 0) + 1;
+  const standbyCount = (existing ?? []).filter((row) => row.is_standby).length;
+  if (!isWithinSessionTraineeLimit(session.num_slots, standbyCount, 1)) {
+    return { error: SESSION_TRAINEE_LIMIT_MESSAGE };
+  }
+
+  const nextSlot = Math.max(0, ...(existing ?? []).map((row) => row.slot_number)) + 1;
   const isStandby = nextSlot > session.num_slots; // past capacity -> standby automatically
 
   const { error } = await supabase.from('session_trainees').insert({
@@ -48,7 +53,7 @@ export async function quickAddTrainee(
     trainee_discord: trainee.discordUsername || null,
     trainee_discord_id: trainee.discordId || null,
     zone: trainee.zone ? parseInt(trainee.zone, 10) : null,
-    trainer_name: trainee.trainerName || null,
+    trainer_name: null,
     note: trainee.note || null,
   });
   if (error) return { error: error.message };

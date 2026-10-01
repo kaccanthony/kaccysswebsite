@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { getApiUser } from '@/lib/apiAuth';
+import { deleteFromR2 } from '@/lib/r2';
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const sessionId = Number((await params).id);
@@ -49,7 +50,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     && BigInt(profile.discord_id) <= BigInt('9223372036854775807')
     ? profile.discord_id
     : null;
-  const { error } = await createAdminClient().rpc('archive_session_conclusion', {
+  const admin = createAdminClient();
+  const { error } = await admin.rpc('archive_session_conclusion', {
     p_session_id: sessionId,
     p_actor_discord_id: actorDiscordId,
   });
@@ -58,6 +60,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       ? 'Archive migration is not installed. Run database/archive_session_conclusion.sql before concluding sessions.'
       : error.message;
     return NextResponse.json({ success: false, message }, { status: 500 });
+  }
+
+  // A tab closed during upload can leave a pending reservation after the live
+  // session has been archived. Ready images are linked to feedback log IDs by
+  // the archive migration before the live trainee rows are deleted.
+  const { data: pending } = await admin.from('feedback_images').select('id, object_key')
+    .eq('session_id', sessionId).eq('status', 'pending');
+  for (const image of pending ?? []) {
+    try {
+      await deleteFromR2(image.object_key);
+      await admin.from('feedback_images').delete().eq('id', image.id).eq('status', 'pending');
+    } catch { /* Do not undo a successful session archive for cleanup failure. */ }
   }
 
   return NextResponse.json({ success: true });

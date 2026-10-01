@@ -58,6 +58,7 @@ export async function getFeedbackLogs(): Promise<FeedbackLog[]> {
 
   const { data: logs, error } = await supabase.from('session_feedback_logs')
     .select('log_id, session_id, trainee_id, trainer_id, created_at, updated_at, trains, setup, conflict, priority, rbtiming, overall, notes, setup_seconds')
+    .not('session_id', 'is', null)
     .order('updated_at', { ascending: false });
 
   if (error) throw error;

@@ -17,6 +17,7 @@ import { lookupKnownTrainee, searchKnownTrainees, validateHostRank, resolveHostB
 import { useModalVisibility } from '@/lib/useModalVisibility';
 import type { SiteTimezoneMode } from '@/lib/siteTimezone';
 import { findDuplicateAssignments } from './duplicateAssignments';
+import { countSessionTraineeSlots, MAX_SESSION_TRAINEES } from '@/lib/session/traineeLimit';
 
 const DRAFT_KEY = 'managesession_draft';
 const SESSION_VIRTUALIZATION_THRESHOLD = 50;
@@ -649,7 +650,6 @@ export default function ManageSessionInteractive({
     setTraineeField(n, 'discord', discordUsername);
     setTraineeField(n, 'discord_id', discordId);
     setTraineeField(n, 'zone', parsed.zone);
-    if (parsed.position) setTraineeField(n, 'trainer', parsed.position);
     if (parsed.notes) setTraineeField(n, 'note', parsed.notes);
     updateDuplicateWarnings();
 
@@ -1155,19 +1155,15 @@ export default function ManageSessionInteractive({
                           <label className="assignment-label">Discord ID <DuplicateWarning visible={duplicateFields.has(`trainee_${n}_discord_id`)} label="Duplicate trainee" /></label>
                           <input type="text" name={`trainee_${n}_discord_id`} defaultValue={t?.trainee_discord_id ?? ''} />
                         </div>
-                        <div className="form-group">
-                          <label>Zone</label>
-                          <input type="number" name={`trainee_${n}_zone`} defaultValue={t?.zone ?? ''} />
-                        </div>
                       </div>
                       <div className="form-row">
                         <div className="form-group flex2">
-                          <label>Trainer</label>
-                          <input type="text" name={`trainee_${n}_trainer`} defaultValue={t?.trainer_name ?? ''} />
-                        </div>
-                        <div className="form-group flex2">
                           <label>Note</label>
                           <input type="text" name={`trainee_${n}_note`} defaultValue={t?.note ?? ''} />
+                        </div>
+                        <div className="form-group flex2">
+                          <label>Zone</label>
+                          <input type="number" name={`trainee_${n}_zone`} defaultValue={t?.zone ?? ''} />
                         </div>
                       </div>
                     </div>
@@ -1175,10 +1171,14 @@ export default function ManageSessionInteractive({
                 })}
 
                 <div className="reserved-slot-actions">
+                  <span className="trainee-capacity-label" role="status" style={{ alignSelf: 'center', color: 'rgba(255,255,255,.5)', fontSize: '.72rem' }}>
+                    {countSessionTraineeSlots(numSlots, reservedSlots)}/{MAX_SESSION_TRAINEES} trainee slots
+                  </span>
                   <button
                     type="button"
                     className="btn-ghost btn-add-row"
-                    disabled={reservedSlots >= 10}
+                    disabled={reservedSlots >= 10 || countSessionTraineeSlots(numSlots, reservedSlots) >= MAX_SESSION_TRAINEES}
+                    title={countSessionTraineeSlots(numSlots, reservedSlots) >= MAX_SESSION_TRAINEES ? `Maximum ${MAX_SESSION_TRAINEES} trainee slots per session.` : undefined}
                     onClick={() => setReservedSlots((count) => Math.min(10, count + 1))}
                   >
                     <FontAwesomeIcon icon={faPlus} /> Add standby/reserved slot

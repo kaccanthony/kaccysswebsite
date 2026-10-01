@@ -6,6 +6,8 @@
 // function exports from those), just plain helpers imported by both actions.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { isWithinSessionTraineeLimit, SESSION_TRAINEE_LIMIT_MESSAGE } from '@/lib/session/traineeLimit';
+import { applyTrainerAssignments } from '@/lib/session/trainerAssignments';
 
 export interface PrimaryRoleDefinition {
   role: string;
@@ -38,6 +40,7 @@ export interface StaffRowInput {
 export function isInternalHelperRole(role: string): boolean {
   return /\binternal helper\b|\bIH\b/i.test(role);
 }
+
 
 /**
  * Parses the primary role selects + repeated Additional Staff rows out of a
@@ -162,6 +165,7 @@ export function buildTraineeRowsFromForm(
   return rows;
 }
 
+
 /** Replaces session_staff + session_trainees for a session with a fresh set built from form data. Throws on failure. */
 export async function writeStaffAndTrainees(
   supabase: SupabaseClient,
@@ -170,8 +174,15 @@ export async function writeStaffAndTrainees(
   numSlots: number,
   reservedSlots = 0
 ): Promise<{ staffRows: StaffRowInput[]; traineeRows: TraineeRowInput[] }> {
+  if (!Number.isSafeInteger(numSlots) || numSlots < 0 || !isWithinSessionTraineeLimit(numSlots, reservedSlots)) {
+    throw new Error(SESSION_TRAINEE_LIMIT_MESSAGE);
+  }
   const staffRows = buildStaffRowsFromForm(formData, sessionId);
-  const traineeRows = buildTraineeRowsFromForm(formData, sessionId, numSlots, reservedSlots);
+  const traineeRows = applyTrainerAssignments(
+    buildTraineeRowsFromForm(formData, sessionId, numSlots, reservedSlots),
+    staffRows,
+    String(formData.get('trainer_assignment_mode') ?? 'auto')
+  );
 
   await replaceSessionChildren(supabase, sessionId, staffRows, traineeRows);
 

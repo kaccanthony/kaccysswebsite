@@ -119,6 +119,7 @@ export interface ReportInput {
   timezoneMode: SiteTimezoneMode;
   hostName: string;
   sessionDateIso: string | null;
+  sessionTime: string | null;
   timeTracker: { briefingStart?: number; sgShiftStart?: number; screenieTime?: number };
   mainAst: string;
   assistants: string[];
@@ -136,7 +137,7 @@ export function buildReportText(input: ReportInput): string {
   return `========REPORT BASED ON THE SIGNALLING PRACTICE==========
 Host: ${input.hostName}
 Date: ${formatDdMmYyyy(input.sessionDateIso)}
-Time: ${formatUKTime(Date.now(), input.timezoneMode)} ${input.timezoneMode}
+Time: ${input.sessionTime?.slice(0, 5) || '--:--'} ${input.timezoneMode}
 
 ----------
 Actual Briefing start: ${formatUKTime(input.timeTracker.briefingStart, input.timezoneMode)}

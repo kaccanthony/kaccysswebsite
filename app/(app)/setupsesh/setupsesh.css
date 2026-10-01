@@ -231,6 +231,8 @@
     border-radius: 8px; padding: 7px 9px; color: #fff; font-size: 0.80rem; font-family: inherit;
 }
 .trainee-input::placeholder, .trainee-zone-field::placeholder { color: rgba(255,255,255,0.28); }
+select.trainee-input { color-scheme: dark; background: #1b1c1f; min-width: 0; }
+select.trainee-input option { background: #1b1c1f; color: #fff; }
 
 .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 .btn-ghost {

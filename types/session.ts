@@ -151,5 +151,5 @@ export interface BellStateRow {
   updated_at: string;
 }
 
-export type ViewerRole = 'Host' | 'Co-Host' | 'Assistant';
+export type ViewerRole = 'Host' | 'Co-Host' | 'Main AST' | 'Assistant' | 'Internal Helper';
 export type MyRole = 'host' | 'cohost' | 'assistant';

@@ -7,6 +7,7 @@ import { getCurrentUser } from '@/lib/getCurrentUser';
 import { createClient } from '@/utils/supabase/server';
 import { writeStaffAndTrainees, upsertKnownTrainees } from '@/lib/sessionStaffTrainees';
 import { findDuplicateAssignments } from '../managesession/duplicateAssignments';
+import { isWithinSessionTraineeLimit, SESSION_TRAINEE_LIMIT_MESSAGE } from '@/lib/session/traineeLimit';
 
 function fail(sessionId: number, message: string): never {
   redirect(`/setupsesh?session_id=${sessionId}&error=${encodeURIComponent(message)}`);
@@ -34,6 +35,9 @@ export async function confirmAndStartSession(formData: FormData) {
 
   const numSlots = parseInt((formData.get('num_slots') as string) || '0', 10);
   const reservedSlots = Math.max(0, Math.min(10, parseInt((formData.get('reserved_slots') as string) || '0', 10) || 0));
+  if (!Number.isSafeInteger(numSlots) || numSlots < 0 || !isWithinSessionTraineeLimit(numSlots, reservedSlots)) {
+    fail(sessionId, SESSION_TRAINEE_LIMIT_MESSAGE);
+  }
 
   const supabase = await createClient();
 
@@ -53,6 +57,11 @@ export async function confirmAndStartSession(formData: FormData) {
 
   const hasHost = staffRows.some((s) => s.role === 'HOST' || s.role.startsWith('HOST,'));
   if (!hasHost) fail(sessionId, 'A Host must be assigned before starting the session.');
+
+  const trainerMode = String(formData.get('trainer_assignment_mode') ?? 'auto');
+  const { error: modeError } = await supabase.from('session_upcoming')
+    .update({ trainer_assignment_mode: trainerMode }).eq('session_id', sessionId);
+  if (modeError) fail(sessionId, modeError.message);
 
   const { error } = await supabase.rpc('start_session', { p_session_id: sessionId });
   if (error) fail(sessionId, error.message);

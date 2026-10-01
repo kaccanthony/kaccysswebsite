@@ -17,6 +17,8 @@ import { searchTraineeCandidates, type TraineeSuggestion } from '@/lib/profileSe
 import { confirmAndStartSession } from './actions';
 import { findDuplicateAssignments } from '../managesession/duplicateAssignments';
 import type { SiteTimezoneMode } from '@/lib/siteTimezone';
+import { countSessionTraineeSlots, MAX_SESSION_TRAINEES } from '@/lib/session/traineeLimit';
+import { eligibleTrainerNames, eligibleTrainerNamesFromForm } from '@/lib/session/trainerAssignments';
 
 function statusClass(status: string) {
   return `detail-status--${status.toLowerCase()}`;
@@ -32,7 +34,7 @@ function DuplicateWarning({ visible }: { visible: boolean }) {
   return visible ? <span className="setup-duplicate-warning" role="status">Duplicate</span> : null;
 }
 
-/** Round-robin distribution of trainees across host + co-hosts, for auto trainer mode. */
+/** Round-robin distribution across assigned Hosts, Co-Hosts, and Internal Helpers. */
 function computeAutoDistribution(numSlots: number, pool: string[]): string[] {
   const names = pool.filter(Boolean);
   if (names.length === 0) return Array(numSlots).fill('');
@@ -252,42 +254,33 @@ function SetupModal({
   const updateDuplicateWarnings = useCallback(() => {
     if (formRef.current) setDuplicateFields(findDuplicateAssignments(new FormData(formRef.current)));
   }, []);
-  const [trainerMode, setTrainerMode] = useState<'auto' | 'manual'>('auto');
+  const [trainerMode, setTrainerMode] = useState<'auto' | 'manual'>(
+    session.trainer_assignment_mode === 'manual' ? 'manual' : 'auto'
+  );
   const [reservedSlots, setReservedSlots] = useState(
     () => session.traineeRows.filter((row) => row.is_standby).length
   );
   const [additionalRows, setAdditionalRows] = useState(() =>
     additionalStaffFrom(session.staffRows).map((r, i) => ({ key: i, ...r }))
   );
+  const [trainerPool, setTrainerPool] = useState(() => eligibleTrainerNames(session.staffRows));
   useEffect(() => {
-    const frame = requestAnimationFrame(updateDuplicateWarnings);
+    const frame = requestAnimationFrame(() => {
+      updateDuplicateWarnings();
+      if (formRef.current) setTrainerPool(eligibleTrainerNamesFromForm(new FormData(formRef.current)));
+    });
     return () => cancelAnimationFrame(frame);
   }, [updateDuplicateWarnings, reservedSlots, additionalRows]);
   const nextRowKey = useRef(additionalRows.length);
+  const autoPreview = computeAutoDistribution(session.num_slots + reservedSlots, trainerPool);
 
-  // live host/co-host values feed the auto-distribution preview — read
-  // straight off the DOM via refs rather than fully controlling every select,
-  // to avoid re-plumbing StaffSelect as a controlled component.
-  const hostRef = useRef<HTMLSelectElement>(null);
-  const ch1Ref = useRef<HTMLSelectElement>(null);
-  const ch2Ref = useRef<HTMLSelectElement>(null);
-  const ch3Ref = useRef<HTMLSelectElement>(null);
-  const [autoPreview, setAutoPreview] = useState<string[]>([]);
-
-  function recomputeAutoPreview() {
-    const pool = [hostRef.current?.value, ch1Ref.current?.value, ch2Ref.current?.value, ch3Ref.current?.value].filter(
-      (v): v is string => !!v
-    );
-    setAutoPreview(computeAutoDistribution(session.num_slots + reservedSlots, pool));
+  function refreshTrainerPool() {
+    if (formRef.current) setTrainerPool(eligibleTrainerNamesFromForm(new FormData(formRef.current)));
   }
 
   function changeReservedSlots(delta: number) {
-    const nextCount = Math.max(0, Math.min(10, reservedSlots + delta));
+    const nextCount = Math.max(0, Math.min(10, MAX_SESSION_TRAINEES - session.num_slots, reservedSlots + delta));
     setReservedSlots(nextCount);
-    const pool = [hostRef.current?.value, ch1Ref.current?.value, ch2Ref.current?.value, ch3Ref.current?.value].filter(
-      (value): value is string => !!value
-    );
-    setAutoPreview(computeAutoDistribution(session.num_slots + nextCount, pool));
   }
 
   function addAdditionalRow() {
@@ -342,7 +335,7 @@ function SetupModal({
           <form
             ref={formRef}
             action={confirmAndStartSession}
-            onChange={updateDuplicateWarnings}
+            onChange={() => { updateDuplicateWarnings(); refreshTrainerPool(); }}
             onSubmit={(event) => {
               const duplicates = findDuplicateAssignments(new FormData(event.currentTarget));
               if (duplicates.size === 0) return;
@@ -366,21 +359,19 @@ function SetupModal({
                   staff={staff}
                   authKey="host_auth"
                   defaultValue={hostMatch}
-                  onChange={recomputeAutoPreview}
-                  selectRef={hostRef}
                 />
               </div>
               <div className={`staff-field${duplicateFields.has('co_host1') ? ' setup-duplicate' : ''}`}>
                 <label className="staff-label">Co-Host 1 <DuplicateWarning visible={duplicateFields.has('co_host1')} /></label>
-                <StaffSelect name="co_host1" staff={staff} authKey="cohost_auth" defaultValue={ch1Match} onChange={recomputeAutoPreview} selectRef={ch1Ref} />
+                <StaffSelect name="co_host1" staff={staff} authKey="cohost_auth" defaultValue={ch1Match} />
               </div>
               <div className={`staff-field${duplicateFields.has('co_host2') ? ' setup-duplicate' : ''}`}>
                 <label className="staff-label">Co-Host 2 <DuplicateWarning visible={duplicateFields.has('co_host2')} /></label>
-                <StaffSelect name="co_host2" staff={staff} authKey="cohost_auth" defaultValue={ch2Match} onChange={recomputeAutoPreview} selectRef={ch2Ref} />
+                <StaffSelect name="co_host2" staff={staff} authKey="cohost_auth" defaultValue={ch2Match} />
               </div>
               <div className={`staff-field${duplicateFields.has('co_host3') ? ' setup-duplicate' : ''}`}>
                 <label className="staff-label">Co-Host 3 <DuplicateWarning visible={duplicateFields.has('co_host3')} /></label>
-                <StaffSelect name="co_host3" staff={staff} authKey="cohost_auth" defaultValue={ch3Match} onChange={recomputeAutoPreview} selectRef={ch3Ref} />
+                <StaffSelect name="co_host3" staff={staff} authKey="cohost_auth" defaultValue={ch3Match} />
                 <label className="ih-check">
                   <input type="checkbox" name="co_host3_ih" defaultChecked={hasIH(session.staffRows, 'CH_3')} /> Internal Helper
                 </label>
@@ -420,7 +411,7 @@ function SetupModal({
             <div className="modal-section-label" style={{ marginTop: 18 }}>
               Trainee Assignment
               <div className="trainer-mode-toggle">
-                <button type="button" className={trainerMode === 'auto' ? 'active' : ''} onClick={() => { setTrainerMode('auto'); recomputeAutoPreview(); }}>Auto</button>
+                <button type="button" className={trainerMode === 'auto' ? 'active' : ''} onClick={() => setTrainerMode('auto')}>Auto</button>
                 <button type="button" className={trainerMode === 'manual' ? 'active' : ''} onClick={() => setTrainerMode('manual')}>Manual</button>
               </div>
             </div>
@@ -435,6 +426,7 @@ function SetupModal({
                   defaultRow={t}
                   trainerMode={trainerMode}
                   autoTrainer={autoPreview[n - 1] ?? ''}
+                  trainerOptions={trainerPool}
                   sessionDateISO={session.session_date}
                   sessionHost={findPrimaryStaff(session.staffRows, 'HOST')}
                   duplicateFields={duplicateFields}
@@ -444,10 +436,13 @@ function SetupModal({
             })}
 
             <div className="reserved-slot-actions">
+              <span role="status" style={{ alignSelf: 'center', color: 'rgba(255,255,255,.55)', fontSize: '.75rem' }}>
+                {countSessionTraineeSlots(session.num_slots, reservedSlots)}/{MAX_SESSION_TRAINEES} trainee slots
+              </span>
               <button
                 type="button"
                 className="btn-add-row"
-                disabled={reservedSlots >= 10}
+                disabled={reservedSlots >= 10 || countSessionTraineeSlots(session.num_slots, reservedSlots) >= MAX_SESSION_TRAINEES}
                 onClick={() => changeReservedSlots(1)}
               >
                 + Add standby/reserved slot
@@ -478,7 +473,7 @@ function SetupModal({
 
 // ── One trainee row, with quick-fill (search known trainees, or paste) ──
 function TraineeRow({
-  n, label, isReserved, defaultRow, trainerMode, autoTrainer, sessionDateISO, sessionHost, duplicateFields, onIdentityChange,
+  n, label, isReserved, defaultRow, trainerMode, autoTrainer, trainerOptions, sessionDateISO, sessionHost, duplicateFields, onIdentityChange,
 }: {
   n: number;
   label: string;
@@ -486,6 +481,7 @@ function TraineeRow({
   defaultRow?: SessionRow['traineeRows'][number];
   trainerMode: 'auto' | 'manual';
   autoTrainer: string;
+  trainerOptions: string[];
   sessionDateISO: string;
   sessionHost: string;
   duplicateFields: Set<string>;
@@ -496,7 +492,7 @@ function TraineeRow({
   const discordIdRef = useRef<HTMLInputElement>(null);
   const zoneRef = useRef<HTMLInputElement>(null);
   const noteRef = useRef<HTMLInputElement>(null);
-  const trainerRef = useRef<HTMLInputElement>(null);
+  const [manualTrainer, setManualTrainer] = useState(defaultRow?.trainer_name ?? '');
 
   const [quickFillOpen, setQuickFillOpen] = useState(false);
   const [quickFillTab, setQuickFillTab] = useState<'search' | 'paste'>('search');
@@ -676,11 +672,17 @@ function TraineeRow({
       </div>
       <div className="trainee-row-input-grid" style={{ marginTop: 6 }}>
         <span className="trainee-row-num" />
-        {trainerMode === 'auto' ? (
-          <input className="trainee-input" type="text" name={`trainee_${n}_trainer`} value={autoTrainer} readOnly placeholder="Trainer (auto)" />
-        ) : (
-          <input ref={trainerRef} className="trainee-input" type="text" name={`trainee_${n}_trainer`} defaultValue={defaultRow?.trainer_name ?? ''} placeholder="Trainer" list="setup-staff-names" />
-        )}
+        <select
+          className="trainee-input"
+          name={`trainee_${n}_trainer`}
+          value={trainerMode === 'auto' ? autoTrainer : (trainerOptions.find((name) => name.toLowerCase() === manualTrainer.toLowerCase()) ?? '')}
+          onChange={(event) => setManualTrainer(event.target.value)}
+          disabled={trainerMode === 'auto'}
+          aria-label={`Trainer for ${label}`}
+        >
+          <option value="">{trainerOptions.length ? '— No trainer —' : '— Assign eligible staff first —'}</option>
+          {trainerOptions.map((name) => <option key={name.toLowerCase()} value={name}>{name}</option>)}
+        </select>
         <input ref={noteRef} className="trainee-input" type="text" name={`trainee_${n}_note`} defaultValue={defaultRow?.note ?? ''} placeholder="Note" style={{ gridColumn: 'span 2' }} />
       </div>
     </div>
