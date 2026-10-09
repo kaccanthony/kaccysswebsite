@@ -46,6 +46,11 @@ export default async function ManageSessionPage() {
     .order('session_time', { ascending: true });
 
   const sessionIds = (sessions ?? []).map((s) => s.session_id);
+  // Optional until database/session_script_links.sql has been applied.
+  const { data: linkRows } = sessionIds.length
+    ? await supabase.from('session_upcoming').select('session_id, event_link, forum_link, private_server_link').in('session_id', sessionIds)
+    : { data: [] as { session_id: number; event_link: string | null; forum_link: string | null; private_server_link: string | null }[] };
+  const linksBySession = new Map((linkRows ?? []).map(row => [row.session_id, row]));
 
   const [{ data: staffRowsRaw }, { data: traineeRowsRaw }] = sessionIds.length
     ? await Promise.all([
@@ -74,6 +79,9 @@ export default async function ManageSessionPage() {
 
   const sessionsWithChildren = (sessions ?? []).map((s) => ({
     ...s,
+    event_link: linksBySession.get(s.session_id)?.event_link ?? null,
+    forum_link: linksBySession.get(s.session_id)?.forum_link ?? null,
+    private_server_link: linksBySession.get(s.session_id)?.private_server_link ?? null,
     staffRows: staffBySession.get(s.session_id) ?? [],
     traineeRows: traineesBySession.get(s.session_id) ?? [],
   }));
@@ -94,6 +102,7 @@ export default async function ManageSessionPage() {
   for (const row of rosterRows ?? []) {
     staffByIdentity.set((row.discord_id || row.discord_username).toLowerCase(), {
       name: row.discord_username,
+      discordId: row.discord_id,
       staff_rank: row.staff_rank,
       op_dept: row.op_dept,
       host_auth: row.host_auth,
@@ -111,6 +120,7 @@ export default async function ManageSessionPage() {
     if (!name) continue;
     staffByIdentity.set((profile.discord_id || name).toLowerCase(), {
       name,
+      discordId: profile.discord_id,
       staff_rank: row.staff_rank,
       op_dept: row.op_dept,
       host_auth: row.host_auth,

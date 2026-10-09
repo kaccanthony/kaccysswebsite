@@ -142,52 +142,11 @@
     border: 2px solid rgba(12, 12, 12, 0.9);
 }
 
-/* ── Live session pill + sync note (shared: rendered both in this header
-   on /active, and in the /active page's own status row via the same
-   <LiveStatusPill/> component reading the same context) ── */
+/* ── Live session status layout; shared pill styling lives in globals.css ── */
 .live-status {
     display: flex;
     align-items: center;
     gap: 10px;
-}
-.live-pill {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 6px 14px;
-    border-radius: 20px;
-    background: rgba(74, 222, 128, 0.12);
-    border: 1px solid rgba(74, 222, 128, 0.30);
-    color: #4ade80;
-    font-size: 0.68rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    white-space: nowrap;
-}
-.live-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #4ade80;
-    animation: live-pulse 1.6s ease-out infinite;
-}
-@keyframes live-pulse {
-    0%   { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.55); }
-    70%  { box-shadow: 0 0 0 8px rgba(74, 222, 128, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
-}
-
-/* ── Gray "no active session" variant ── */
-.live-pill-off {
-    background: rgba(255, 255, 255, .05);
-    border-color: rgba(255, 255, 255, 0.10);
-    color: rgba(255, 255, 255, 0.32);
-}
-.live-dot.off {
-    background: rgba(255, 255, 255, .35);
-    animation: none;
-    box-shadow: none;
 }
 
 .sync-note {

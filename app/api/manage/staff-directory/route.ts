@@ -5,11 +5,25 @@
 // /api/manage/records route — see the `joined: true` flag on staff_directory in manageTables.ts.
 
 import { NextRequest, NextResponse } from 'next/server';
+import { createAdminClient } from '@/utils/supabase/admin';
 import { createClient } from '@/utils/supabase/server';
 import { getApiUser } from '@/lib/apiAuth';
+import { orderStaffRows } from '@/lib/staffRankOrder';
 
 const PROFILE_FIELDS = ['roblox_username', 'nationality', 'hide_stats'] as const;
 const STAFF_FIELDS = ['staff_rank', 'staff_joined', 'staff_loa', 'staff_quota_met', 'staff_perm_level'] as const;
+const STAFF_BOOLEAN_FIELDS = new Set<string>(['staff_loa', 'staff_quota_met']);
+type LinkedProfile = {
+  discord_id?: string | null;
+  discord_username?: string | null;
+  discord_server_name?: string | null;
+  discord_avatar_url?: string | null;
+  roblox_avatar_url?: string | null;
+  roblox_username?: string | null;
+  nationality?: string | null;
+  num_sessions_attended?: number | null;
+  hide_stats?: boolean | null;
+};
 
 export async function GET() {
   const user = await getApiUser();
@@ -18,34 +32,47 @@ export async function GET() {
     return NextResponse.json({ success: false, message: 'Insufficient permission for this table.' }, { status: 403 });
   }
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { data, error } = await supabase
     .from('staff_profiles')
     .select(
       'id, staff_rank, staff_joined, staff_loa, staff_quota_met, staff_perm_level, ' +
-        'profiles(discord_username, discord_avatar_url, roblox_username, nationality, num_sessions_attended, hide_stats)'
+        'op_dept, comm_dept, host_auth, cohost_auth, asst_auth, eventh_auth, eventch_auth, ih_auth, ' +
+        'profiles(discord_id, discord_username, discord_server_name, discord_avatar_url, roblox_avatar_url, roblox_username, nationality, num_sessions_attended, hide_stats)'
     )
     .order('staff_perm_level', { ascending: false });
 
   if (error) return NextResponse.json({ success: false, message: error.message }, { status: 500 });
 
   // Flatten the join into the same flat-row shape every other board uses.
-  const rows = (data ?? []).map((row: any) => ({
+  const joinedRows = (data ?? []) as unknown as Array<Record<string, unknown> & { profiles?: LinkedProfile | null }>;
+  const rows = joinedRows.map((row) => ({
     id: row.id,
     staff_rank: row.staff_rank,
     staff_joined: row.staff_joined,
     staff_loa: row.staff_loa,
     staff_quota_met: row.staff_quota_met,
     staff_perm_level: row.staff_perm_level,
+    op_dept: row.op_dept,
+    comm_dept: row.comm_dept,
+    host_auth: row.host_auth,
+    cohost_auth: row.cohost_auth,
+    asst_auth: row.asst_auth,
+    eventh_auth: row.eventh_auth,
+    eventch_auth: row.eventch_auth,
+    ih_auth: row.ih_auth,
+    discord_id: row.profiles?.discord_id ?? null,
     discord_username: row.profiles?.discord_username ?? null,
+    discord_server_name: row.profiles?.discord_server_name ?? null,
     discord_avatar_url: row.profiles?.discord_avatar_url ?? null,
+    roblox_avatar_url: row.profiles?.roblox_avatar_url ?? null,
     roblox_username: row.profiles?.roblox_username ?? null,
     nationality: row.profiles?.nationality ?? null,
     num_sessions_attended: row.profiles?.num_sessions_attended ?? null,
     hide_stats: row.profiles?.hide_stats ?? null,
   }));
 
-  return NextResponse.json({ success: true, rows });
+  return NextResponse.json({ success: true, rows: orderStaffRows(rows, (row) => row.staff_rank) });
 }
 
 // "Create" here means promoting an EXISTING profile to staff (you can't hand-create a
@@ -103,7 +130,7 @@ export async function PUT(req: NextRequest) {
     if (!(f in rawData)) continue;
     if (f === 'staff_rank' && !canChangeRank) continue;
     if (f === 'staff_perm_level' && user.permLevel < 20) continue;
-    staffUpdate[f] = f === 'staff_loa' || f === 'staff_quota_met' ? !!rawData[f] : rawData[f];
+    staffUpdate[f] = STAFF_BOOLEAN_FIELDS.has(f) ? !!rawData[f] : rawData[f];
   }
 
   if (Object.keys(profileUpdate).length === 0 && Object.keys(staffUpdate).length === 0) {

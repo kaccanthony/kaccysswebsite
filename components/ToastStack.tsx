@@ -13,16 +13,17 @@ export interface ToastEntry {
 }
 
 export default function ToastStack({
-  toasts, onDismiss, timed = false,
+  toasts, onDismiss, timed = false, connection = false,
 }: {
   toasts: readonly ToastEntry[];
   onDismiss: (id: number) => void;
   timed?: boolean;
+  connection?: boolean;
 }) {
   return (
-    <div className={styles.toastContainer} aria-live="polite" aria-atomic="false">
+    <div className={styles.toastContainer} data-toast-stack data-connection-stack={connection || undefined} aria-live="polite" aria-atomic="false">
       {toasts.map((toast) => (
-        <div key={toast.id} className={`${styles.toast} ${styles.show} ${styles[toast.kind]}${timed ? ` ${styles.timed}` : ''}`}>
+        <div key={toast.id} data-toast className={`${styles.toast} ${styles.show} ${styles[toast.kind]}${timed ? ` ${styles.timed}` : ''}`}>
           <div className={styles.toastMsg}>
             <FontAwesomeIcon icon={toast.kind === 'success' ? faCheck : toast.kind === 'info' ? faCircleDot : faTriangleExclamation} />
             <div className={styles.toastText}>

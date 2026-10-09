@@ -59,8 +59,8 @@ export function formatRoleDisplay(rawRole: string, permLevel: number): string {
  
 // ── Bento card catalog ──────────────────────────────────────────────
 export type CardKey =
-  | 'booking' | 'setup' | 'feedback' | 'my_session' | 'manage_events' | 'active' | 'upcoming'
-  | 'past' | 'events' | 'staff' | 'manage_staff' | 'admin_panel';
+  | 'booking' | 'setup' | 'event_setup' | 'feedback' | 'my_session' | 'manage_events' | 'active' | 'upcoming'
+  | 'past' | 'event_panel' | 'staff' | 'manage_staff' | 'admin_panel';
  
 export interface BentoCard {
   key: CardKey;
@@ -75,14 +75,15 @@ export function getAllCards(myLiveSessionId: number | null): Record<CardKey, Ben
   return {
     booking:      { key: 'booking', label: 'Manage Session(s)', sub: 'Manager & Head Staff', icon: '/images/icons/OM.png', href: '/managesession' },
     setup:        { key: 'setup', label: 'Session Setup', sub: 'Head-Staff', icon: '/images/icons/HS.png', href: '/setupsesh'},
+    event_setup:  { key: 'event_setup', label: 'Event Setup', sub: 'Event Host Authorized', icon: '/images/icons/ST.png', href: '/eventsetup' },
     feedback:     { key: 'feedback', label: 'Trainer Feedback', sub: 'Operations · Co-Host Authorized', icon: '/images/icons/ST.png', href: '/feedbacktrainer' },
     my_session:   { key: 'my_session', label: 'Session Panel', sub: 'All Staff (depending on your role)', icon: '/images/icons/ST.png', href: `/sessionongoing?session_id=${myLiveSessionId ?? ''}`},
-    manage_events: { key: 'manage_events', label: 'Manage Events', sub: 'Event Authorized+', icon: '/images/icons/ST.png', href: '/manageevents', wip: true },
-    events:       { key: 'events', label: 'Events', sub: '', icon: 'book', href: '/events', wip: true },
+    manage_events: { key: 'manage_events', label: 'Manage Events', sub: 'Event Host / Co-Host', icon: '/images/icons/ST.png', href: '/manageevents' },
+    event_panel:  { key: 'event_panel', label: 'Event Panel', sub: 'Live event', icon: 'book', href: '/eventpanel' },
     active:       { key: 'active', label: 'Active Session', sub: '', icon: 'clock', href: '/active'},
-    upcoming:     { key: 'upcoming', label: 'Upcoming Sessions', sub: '', icon: 'clock', href: '/upcomingsesh'},
+    upcoming:     { key: 'upcoming', label: 'Upcoming', sub: 'Sessions & events', icon: 'clock', href: '/upcoming'},
     past:         { key: 'past', label: 'Past Sessions', sub: '', icon: 'backwardFast', href: '/past'},
-    staff:        { key: 'staff', label: 'Staff Overview', sub: '', icon: 'users', href: '/staff', wip: true },
+    staff:        { key: 'staff', label: 'Staff Overview', sub: '', icon: 'users', href: '/staff' },
     manage_staff: { key: 'manage_staff', label: 'Manage Staff', sub: 'Manager & Admin', icon: '/images/icons/OM.png', href: '/manage'},
     admin_panel:  { key: 'admin_panel', label: 'Admin Panel', sub: 'Admin only', icon: 'userTie', href: '/adminpanel'},
   };
@@ -98,27 +99,28 @@ export const ROLE_CARDS: Record<string, CardKey[]> = {
   'Co-Host Authorized': ['my_session', 'active', 'upcoming', 'past', 'feedback', 'staff'],
   'Assistant Authorized': ['my_session', 'active', 'upcoming', 'past', 'staff'],
   'Event Authorized': ['my_session', 'active', 'upcoming', 'past', 'staff'],
-  '': ['active', 'upcoming', 'past'], // NSH / regular community members
+  '': ['active', 'upcoming', 'past', 'staff'], // NSH / regular community members
 };
  
 export interface CardsInput {
   rawRole: string;
   isAdmin: boolean;
   myLiveSessionId: number | null;
+  eventHostAuthorized?: boolean;
 }
  
-export function getVisibleCards({ rawRole, isAdmin, myLiveSessionId }: CardsInput): BentoCard[] {
+export function getVisibleCards({ rawRole, isAdmin, myLiveSessionId, eventHostAuthorized = false }: CardsInput): BentoCard[] {
   const allCards = getAllCards(myLiveSessionId);
  
   // Full admin/dev access — every card, regardless of staff rank.
   if (isAdmin) {
     return (Object.keys(allCards) as CardKey[])
-      .filter((key) => key !== 'my_session' || myLiveSessionId)
+      .filter((key) => key !== 'event_panel' && (key !== 'my_session' || myLiveSessionId))
       .map((key) => allCards[key]);
   }
  
   const allowedKeys = ROLE_CARDS[rawRole] ?? ROLE_CARDS[''];
-  return allowedKeys
+  return [...allowedKeys, ...(eventHostAuthorized ? ['event_setup' as CardKey] : [])]
     .filter((key) => key !== 'my_session' || myLiveSessionId)
     .map((key) => allCards[key]);
 }

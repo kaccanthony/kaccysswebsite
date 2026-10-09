@@ -13,7 +13,7 @@ import {
   faArrowUpWideShort, faBan, faChalkboardUser, faPlus, faTrash, faCaretUp, faCaretDown,
   faPlay, faPause, faCheck, faStopwatch, faClone, faCommentDots, faEye, faEyeSlash,
   faCopy, faBullhorn, faReply, faPaperPlane, faCameraRetro, faTableColumns,
-  faFlagCheckered, faClipboardList, faCog, faPen, faSquareCheck,
+  faFlagCheckered, faClipboardList, faCog, faPen, faSquareCheck, faScroll,
 } from '@fortawesome/free-solid-svg-icons';
 import { faDiscord, faRobloxCreatorStudio, } from '@fortawesome/free-brands-svg-icons';
 import { getRobloxThumbnailUrl } from './robloxThumbnails';
@@ -73,6 +73,7 @@ export const ICONS = {
   cog: faCog,
   pen: faPen,
   squareCheck: faSquareCheck,
+  scroll: faScroll,
   robloxCreatorStudio: faRobloxCreatorStudio,
 } as const;
 

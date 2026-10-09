@@ -10,6 +10,7 @@ import { createClient } from '@/utils/supabase/server';
 import { createAdminClient } from '@/utils/supabase/admin';
 import { getApiUser } from '@/lib/apiAuth';
 import { getTableConfig, type BoardConfig, type ColumnDef } from '@/lib/manageTables';
+import { orderStaffRows } from '@/lib/staffRankOrder';
 
 function boardFor(tableKey: string): BoardConfig | null {
   const cfg = getTableConfig();
@@ -36,9 +37,15 @@ export async function GET(req: NextRequest) {
   }
 
   const supabase = await createClient();
-  const colNames = Object.keys(board.columns);
+  const colNames = Object.entries(board.columns)
+    .filter(([, definition]) => !definition.derived)
+    .map(([column]) => column);
   const isSessionLogTable = tableKey === 'session_full_logs' || tableKey === 'session_feedback_logs';
-  const selectColumns = isSessionLogTable
+  const selectColumns = tableKey === 'staff_archived'
+    ? colNames.map((column) => column === 'staff_id' ? 'staff_id::text' : column).join(', ')
+    : tableKey === 'session_ongoing'
+    ? colNames.filter((column) => column !== 'host').join(', ')
+    : isSessionLogTable
     ? colNames.map((column) => column === 'trainee_id' || column === 'trainer_id' ? `${column}::text` : column).join(', ')
     : colNames.join(', ');
   const { data, error } = await supabase
@@ -49,6 +56,89 @@ export async function GET(req: NextRequest) {
 
   if (error) {
     return NextResponse.json({ success: false, message: `Config/schema mismatch for this table: ${error.message}` }, { status: 500 });
+  }
+
+  if (tableKey === 'staff_roster' || tableKey === 'staff_archived') {
+    const staffRows = (data ?? []) as unknown as Array<Record<string, unknown>>;
+    const discordIds = [...new Set(staffRows.map((row) => String(row.discord_id ?? row.staff_id ?? '')).filter(Boolean))];
+    const profiles = discordIds.length
+      ? await createAdminClient().from('profiles')
+        .select('discord_id, discord_server_name, discord_avatar_url, roblox_avatar_url, roblox_username')
+        .in('discord_id', discordIds)
+      : { data: [], error: null };
+    if (profiles.error) {
+      return NextResponse.json({ success: false, message: `Could not load staff profiles: ${profiles.error.message}` }, { status: 500 });
+    }
+    const profileByDiscordId = new Map((profiles.data ?? []).map((profile) => [profile.discord_id, profile]));
+    return NextResponse.json({
+      success: true,
+      rows: orderStaffRows(staffRows.map((row) => {
+        const profile = profileByDiscordId.get(String(row.discord_id ?? row.staff_id ?? ''));
+        return {
+          ...row,
+          discord_avatar_url: profile?.discord_avatar_url ?? null,
+          roblox_avatar_url: profile?.roblox_avatar_url ?? null,
+          ...(tableKey === 'staff_roster' ? {
+            discord_server_name: profile?.discord_server_name ?? null,
+            roblox_username: profile?.roblox_username ?? null,
+          } : {}),
+        };
+      }), (row) => (row as Record<string, unknown>).staff_rank),
+    });
+  }
+
+  if (tableKey === 'staff_timeline' || tableKey === 'staff_quota') {
+    const staffRows = (data ?? []) as unknown as Array<Record<string, unknown>>;
+    const profileIds = [...new Set(staffRows.map((row) => row.profile_id)
+      .filter((id): id is string => typeof id === 'string' && !!id))];
+    const admin = createAdminClient();
+    const ranks = profileIds.length
+      ? await admin.from('staff_profiles').select('id, staff_rank').in('id', profileIds)
+      : { data: [] as { id: string; staff_rank: string | null }[], error: null };
+    if (ranks.error) {
+      return NextResponse.json({ success: false, message: `Could not load staff ranks: ${ranks.error.message}` }, { status: 500 });
+    }
+    const profiles = profileIds.length
+      ? await admin.from('profiles').select('id, discord_avatar_url, roblox_avatar_url, roblox_username').in('id', profileIds)
+      : { data: [] as { id: string; discord_avatar_url: string | null; roblox_avatar_url: string | null; roblox_username: string | null }[], error: null };
+    if (profiles.error) {
+      return NextResponse.json({ success: false, message: `Could not load staff profiles: ${profiles.error.message}` }, { status: 500 });
+    }
+    const rankByProfile = new Map((ranks.data ?? []).map((row) => [row.id, row.staff_rank]));
+    const profileById = new Map((profiles.data ?? []).map((row) => [row.id, row]));
+    return NextResponse.json({
+      success: true,
+      rows: orderStaffRows(staffRows.map((row) => {
+        const profileId = String(row.profile_id ?? '');
+        const profile = profileById.get(profileId);
+        return {
+          ...row,
+          staff_rank: rankByProfile.get(profileId) ?? null,
+          discord_avatar_url: profile?.discord_avatar_url ?? null,
+          roblox_avatar_url: profile?.roblox_avatar_url ?? null,
+          roblox_username: profile?.roblox_username ?? null,
+        };
+      }), (row) => row.staff_rank),
+    });
+  }
+
+  if (tableKey === 'session_ongoing' && data?.length) {
+    const sessionRows = data as unknown as Array<{ session_id: number; [key: string]: unknown }>;
+    const sessionIds = sessionRows.map((row) => row.session_id);
+    const { data: staffRows, error: staffError } = await supabase
+      .from('session_staff')
+      .select('session_id, role, staff_name')
+      .in('session_id', sessionIds);
+    if (staffError) {
+      return NextResponse.json({ success: false, message: `Could not load session hosts: ${staffError.message}` }, { status: 500 });
+    }
+    const hosts = new Map((staffRows ?? [])
+      .filter((row) => row.role === 'HOST' || row.role.startsWith('HOST,'))
+      .map((row) => [row.session_id, row.staff_name]));
+    return NextResponse.json({ success: true, rows: sessionRows.map((row) => ({
+      ...row,
+      host: hosts.get(row.session_id) ?? null,
+    })) });
   }
 
   if (isSessionLogTable && data?.length) {
@@ -124,6 +214,7 @@ export async function POST(req: NextRequest) {
   const data: Record<string, unknown> = {};
   const rawData = body.data ?? {};
   for (const [col, def] of Object.entries(board.columns)) {
+    if (def.derived) continue;
     if ((def.editableOnCreate ?? true) === false && col !== board.primaryKey) continue;
     if (def.minLevel && user.permLevel < def.minLevel) continue;
     if (!(col in rawData)) continue;
@@ -169,6 +260,7 @@ export async function PUT(req: NextRequest) {
   const rawData = body.data ?? {};
   const data: Record<string, unknown> = {};
   for (const [col, def] of Object.entries(board.columns)) {
+    if (def.derived) continue;
     if (col === board.primaryKey) continue;
     if ((def.editableOnUpdate ?? true) === false) continue;
     if (def.minLevel && user.permLevel < def.minLevel) continue;

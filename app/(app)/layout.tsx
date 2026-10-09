@@ -4,6 +4,7 @@ import { formatNameWithPrefix, getRoleLabel } from '@/lib/roles';
 import AppShell, { type AssignedSession } from './AppShell';
 import { createClient } from '@/utils/supabase/server';
 import { currentSiteTimeParts, getSiteTimezoneMode } from '@/lib/siteTimezone';
+import { getOngoingActivity } from '@/lib/ongoingActivity';
 
 function serverRenderTime(): number {
   return Date.now();
@@ -100,6 +101,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   ]);
   const readSet = new Set((readRows ?? []).map((r) => r.notif_id));
   const unreadCount = (recipientRows ?? []).filter((r) => !readSet.has(r.notif_id)).length;
+  const ongoingActivity = await getOngoingActivity(supabase);
 
   // ── Does this person have a live session right now? (drives the topbar pill) ──
   // Same session_staff -> session_ongoing check as dashboard/page.tsx's my_session
@@ -149,6 +151,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         assignedSessions={assignedSessions}
         viewingAs={user.viewingAs}
         unreadCount={unreadCount}
+        ongoingActivity={ongoingActivity}
         hasLiveSession={hasLiveSession}
         liveSessionLastChangeAt={liveSessionLastChangeAt}
       >

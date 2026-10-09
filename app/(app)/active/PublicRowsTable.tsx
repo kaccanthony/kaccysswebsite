@@ -1,77 +1,61 @@
 'use client';
 // FILE: app/(app)/active/PublicRowsTable.tsx
-// Replaces the refreshPublicTable() polling loop from active.js.
-// Now also the single source of truth for "is this session live, and when
-// did the data last actually change" — reported up via LiveSessionContext so
-// both the header pill and this page's own status pill read the same value.
+// Refreshes the public trainee table when the database broadcasts a change.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCheckCircle, faCircle } from '@fortawesome/free-solid-svg-icons';
 import type { PublicSessionRow } from '@/lib/activeSession';
-import { useLiveSessionActions } from '../LiveSessionContext';
+import { createClient } from '@/utils/supabase/client';
 
 export default function PublicRowsTable({
   sessionId,
   initialRows,
-  initialLastChangeAt,
 }: {
   sessionId: number;
   initialRows: PublicSessionRow[];
-  initialLastChangeAt: number | null;
 }) {
   const [rows, setRows] = useState<PublicSessionRow[]>(initialRows);
-  const { reportActive } = useLiveSessionActions();
-  const lastSnapshot = useRef(JSON.stringify(initialRows));
-  const lastDatabaseChange = useRef(initialLastChangeAt);
 
   useEffect(() => {
     if (!sessionId) return;
-    let pending = false;
     let disposed = false;
-    let controller: AbortController | null = null;
-
-    // the server just gave us fresh data for this render — that counts as a change
-    reportActive(false, initialLastChangeAt ?? undefined);
+    let pending = false;
+    let refreshAgain = false;
 
     async function refresh() {
-      if (pending) return;
+      if (pending) { refreshAgain = true; return; }
       pending = true;
-      controller = new AbortController();
-      try {
-        const res = await fetch(`/api/active-session-state?session_id=${sessionId}`, { signal: controller.signal });
-        const data = await res.json();
-        if (disposed) return;
-        const newRows: PublicSessionRow[] = data.rows ?? [];
-        const snapshot = JSON.stringify(newRows);
-        const databaseChange = typeof data.lastChangeAt === 'number' ? data.lastChangeAt : null;
-        const changed = databaseChange !== null
-          ? databaseChange !== lastDatabaseChange.current
-          : snapshot !== lastSnapshot.current;
-        const rowsChanged = snapshot !== lastSnapshot.current;
-        lastSnapshot.current = snapshot;
-        lastDatabaseChange.current = databaseChange;
-
-        if (rowsChanged) setRows(newRows);
-        reportActive(changed, databaseChange ?? undefined);
-      } catch {
-        // silent — just retry next poll (same as the PHP version).
-        // Note: we deliberately do NOT call reportActive() here, since a
-        // failed poll means we don't actually know anything changed — the
-        // sync note will correctly keep counting up from the last real change.
-      } finally {
-        pending = false;
-        controller = null;
-      }
+      do {
+        refreshAgain = false;
+        try {
+          const res = await fetch(`/api/active-session-state?session_id=${sessionId}`, { cache: 'no-store' });
+          if (!res.ok || disposed) continue;
+          const data = await res.json();
+          if (!disposed) setRows(data.rows ?? []);
+        } catch { /* Keep the last known rows until the next change. */ }
+      } while (refreshAgain && !disposed);
+      pending = false;
     }
 
-    const interval = setInterval(refresh, 5000);
+    const supabase = createClient();
+    const broadcast = supabase.channel('public-active-state', { config: { private: false } })
+      .on('broadcast', { event: 'changed' }, (payload) => {
+        const changedId = Number(payload.payload?.session_id);
+        if (changedId === sessionId) void refresh();
+      })
+      .subscribe((status) => { if (status === 'SUBSCRIBED') void refresh(); });
+    const rowsChannel = supabase.channel(`public-active-rows-${sessionId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'session_ongoing', filter: `session_id=eq.${sessionId}` }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'session_trainees', filter: `session_id=eq.${sessionId}` }, refresh)
+      .subscribe();
+    window.addEventListener('online', refresh);
     return () => {
       disposed = true;
-      controller?.abort();
-      clearInterval(interval);
+      window.removeEventListener('online', refresh);
+      void supabase.removeChannel(broadcast);
+      void supabase.removeChannel(rowsChannel);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reportActive only touches stable setState fns
   }, [sessionId]);
 
   return (

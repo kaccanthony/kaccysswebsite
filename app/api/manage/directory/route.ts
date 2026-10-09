@@ -5,7 +5,7 @@
 // staff are merged in afterwards only as a fallback for ids that no longer have a live profile.
 
 import { NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
+import { createAdminClient } from '@/utils/supabase/admin';
 import { getApiUser } from '@/lib/apiAuth';
 
 export async function GET() {
@@ -15,7 +15,7 @@ export async function GET() {
     return NextResponse.json({ success: false, message: 'Insufficient permission.' }, { status: 403 });
   }
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const map: Record<string, string> = {};
 
   const { data: profiles } = await supabase.from('profiles').select('id, discord_id, discord_username');

@@ -215,6 +215,25 @@ select.cellInput option, select.cellInput optgroup { background: #18191c; color:
 .announceFab { position: relative; width: 56px; height: 56px; border-radius: 50%; border: 1px solid rgba(255,255,255,.18); background: #ff9f43; color: #2a1500; font-size: 1.3rem; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 12px 30px rgba(0,0,0,.5); }
 .announceFab:hover { filter: brightness(1.08); }
 
+.briefingWidget { position: fixed; right: 88px; top: calc(100vh - 96px); z-index: 600; }
+.briefingFab { width: 56px; height: 56px; border-radius: 50%; border: 1px solid rgba(255,255,255,.18); background: #88E788; color: #102810; font-size: 1.3rem; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 12px 30px rgba(0,0,0,.5); }
+.briefingFab:hover { filter: brightness(1.08); }
+
+.briefingPip { min-height: 100vh; box-sizing: border-box; padding: 18px; background: #111713; color: #f4fff4; font-family: inherit; }
+.briefingPip h1 { display: flex; align-items: center; gap: 9px; margin: 0; font-size: 1.1rem; }
+.briefingPip h1 svg { color: #88E788; }
+.briefingPipIntro, .briefingHint { color: rgba(244,255,244,.62); font-size: .78rem; line-height: 1.5; }
+.briefingPipIntro { margin: 8px 0 18px; }
+.briefingSection { margin: 0 0 18px; }
+.briefingSection h2 { color: #88E788; font-size: .9rem; margin: 0 0 7px; }
+.briefingHint { margin: 0 0 8px; }
+.briefingLine { display: flex; align-items: flex-start; gap: 8px; padding: 10px; margin: 0 0 7px; border: 1px solid rgba(136,231,136,.22); border-radius: 9px; background: rgba(255,255,255,.04); }
+.briefingLine p { flex: 1; margin: 0; white-space: pre-wrap; font-size: .8rem; line-height: 1.5; }
+.briefingLine input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: #fff; font: inherit; font-size: .8rem; }
+.briefingLine button { flex: 0 0 32px; width: 32px; height: 32px; border: 1px solid rgba(136,231,136,.35); border-radius: 7px; background: rgba(136,231,136,.12); color: #88E788; cursor: pointer; }
+.briefingLine button:hover { background: rgba(136,231,136,.24); }
+.briefingLine button:disabled { opacity: .4; cursor: default; }
+
 .announcePanel { position: absolute; right: 0; bottom: calc(100% + 12px); display: none; width: 280px; background: rgba(18,18,20,.94); border: 1px solid rgba(255,255,255,.18); border-radius: 14px; box-shadow: 0 16px 48px rgba(0,0,0,.55); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); overflow: hidden; }
 .announcePanel.open { display: block; animation: bellPanelIn .2s ease both; }
 .announcePanelHeader { padding: 10px 14px; background: rgba(255,255,255,.05); border-bottom: 1px solid rgba(255,255,255,.10); font-size: .78rem; color: rgba(255,255,255,.85); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -392,7 +411,8 @@ select.cellInput option, select.cellInput optgroup { background: #18191c; color:
 
   .bellWidget { left: 12px; top: auto; bottom: 14px; }
   .announceWidget { right: 12px; top: auto; bottom: 14px; }
-  .bellFab, .announceFab { width: 52px; height: 52px; }
+  .briefingWidget { right: 72px; top: auto; bottom: 14px; }
+  .bellFab, .announceFab, .briefingFab { width: 52px; height: 52px; }
   .bellPanel { width: min(300px, calc(100vw - 24px)); }
   .announcePanel { width: min(280px, calc(100vw - 24px)); }
 

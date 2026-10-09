@@ -23,12 +23,15 @@
 //    built out instead of left as `comingSoon` placeholders (pure bonus, nothing lost).
 //  • site_admins is a new table (dev/owner/moderator roles) — surfaced as an Admin Only board.
 
+import { STAFF_RANK_ORDER } from './staffRankOrder';
+
 export type ColumnType =
   | 'text'
   | 'number'
   | 'date'
   | 'bool'
   | 'select'
+  | 'staff_select'
   | 'textarea'
   | 'discord_avatar'
   | 'staff_roster_json';
@@ -36,6 +39,8 @@ export type ColumnType =
 export interface ColumnDef {
   label: string;
   type: ColumnType;
+  /** Read-only value supplied by a linked table rather than this board's physical table. */
+  derived?: boolean;
   /** Default true. Set false to hide/lock the field when creating a row. */
   editableOnCreate?: boolean;
   /** Default true. Set false to hide/lock the field when editing a row. */
@@ -88,19 +93,57 @@ export function getTableConfig(): Record<string, BoardConfig> {
       columns: {
         id: { label: 'Profile ID', type: 'text', editableOnCreate: false, editableOnUpdate: false },
         discord_avatar_url: { label: 'Avatar', type: 'discord_avatar', editableOnCreate: false, editableOnUpdate: false },
+        discord_id: { label: 'Discord ID', type: 'text', editableOnCreate: false, editableOnUpdate: false },
         discord_username: { label: 'Discord Username', type: 'text', editableOnUpdate: false },
+        discord_server_name: { label: 'Server Name', type: 'text', editableOnCreate: false, editableOnUpdate: false },
         roblox_username: { label: 'Roblox Username', type: 'text' },
         nationality: { label: 'Nationality', type: 'text' },
         staff_rank: {
           label: 'Rank', type: 'select', pill: true,
-          options: ['Community Manager', 'Operations Manager', 'Head Staff', 'Co-Host Authorized', 'Assistant Authorized', 'Event Authorized'],
+          options: [...STAFF_RANK_ORDER],
         },
         staff_joined: { label: 'Joined', type: 'date' },
         staff_loa: { label: 'On LOA', type: 'bool' },
         staff_quota_met: { label: 'Quota Met', type: 'bool' },
         staff_perm_level: { label: 'Perm Level', type: 'number', minLevel: 20 },
+        op_dept: { label: 'Operations', type: 'bool', editableOnCreate: false, editableOnUpdate: false },
+        comm_dept: { label: 'Community', type: 'bool', editableOnCreate: false, editableOnUpdate: false },
+        host_auth: { label: 'Host Auth', type: 'bool', editableOnCreate: false, editableOnUpdate: false },
+        cohost_auth: { label: 'Co-Host Auth', type: 'bool', editableOnCreate: false, editableOnUpdate: false },
+        asst_auth: { label: 'Assistant Auth', type: 'bool', editableOnCreate: false, editableOnUpdate: false },
+        eventh_auth: { label: 'Event Host Auth', type: 'bool', editableOnCreate: false, editableOnUpdate: false },
+        eventch_auth: { label: 'Event Co-Host Auth', type: 'bool', editableOnCreate: false, editableOnUpdate: false },
+        ih_auth: { label: 'Internal Helper Auth', type: 'bool', editableOnCreate: false, editableOnUpdate: false },
         num_sessions_attended: { label: 'Sessions Attended', type: 'number' },
         hide_stats: { label: 'Hide Stats', type: 'bool' },
+      },
+    },
+    staff_roster: {
+      label: 'Staff Roster (Snapshot)',
+      group: 'Staff Management',
+      minLevel: 15,
+      table: 'staff_roster',
+      primaryKey: 'discord_id',
+      displayMode: 'table',
+      readOnly: true,
+      readOnlyReason: 'View only. Staff identities and authorizations are managed through the staff workflow.',
+      columns: {
+        discord_avatar_url: { label: 'Avatar', type: 'discord_avatar', derived: true },
+        discord_id: { label: 'Discord ID', type: 'text' },
+        discord_username: { label: 'Discord Username', type: 'text' },
+        discord_server_name: { label: 'Server Name', type: 'text', derived: true },
+        roblox_username: { label: 'Roblox Username', type: 'text', derived: true },
+        staff_rank: { label: 'Rank', type: 'text', pill: true },
+        staff_joined: { label: 'Joined', type: 'date' },
+        op_dept: { label: 'Operations', type: 'bool' },
+        comm_dept: { label: 'Community', type: 'bool' },
+        host_auth: { label: 'Host Auth', type: 'bool' },
+        cohost_auth: { label: 'Co-Host Auth', type: 'bool' },
+        asst_auth: { label: 'Assistant Auth', type: 'bool' },
+        eventh_auth: { label: 'Event Host Auth', type: 'bool' },
+        eventch_auth: { label: 'Event Co-Host Auth', type: 'bool' },
+        ih_auth: { label: 'Internal Helper Auth', type: 'bool' },
+        claimed: { label: 'Claimed', type: 'bool' },
       },
     },
     staff_archived: {
@@ -111,10 +154,12 @@ export function getTableConfig(): Record<string, BoardConfig> {
       primaryKey: 'staff_id',
       displayMode: 'table',
       columns: {
+        discord_avatar_url: { label: 'Avatar', type: 'discord_avatar', derived: true },
         staff_id: { label: 'Discord ID', type: 'text', editableOnCreate: true, editableOnUpdate: false },
         staff_name: { label: 'Discord Username', type: 'text' },
         staff_display_name: { label: 'Display Name', type: 'text' },
         staff_roblox_name: { label: 'Roblox Username', type: 'text' },
+        staff_roblox_id: { label: 'Roblox User ID', type: 'number' },
         staff_nationality: { label: 'Nationality', type: 'text' },
         staff_rank: { label: 'Rank (at time of leaving)', type: 'text' },
         staff_days: { label: 'Days as Staff', type: 'number' },
@@ -131,7 +176,10 @@ export function getTableConfig(): Record<string, BoardConfig> {
       primaryKey: 'profile_id',
       displayMode: 'table',
       columns: {
+        discord_avatar_url: { label: 'Avatar', type: 'discord_avatar', derived: true },
         profile_id: { label: 'Staff', type: 'text', editableOnCreate: true, editableOnUpdate: false, resolveId: true },
+        staff_rank: { label: 'Current Rank', type: 'text', pill: true, derived: true },
+        roblox_username: { label: 'Roblox Username', type: 'text', derived: true },
         days_as_staff: { label: 'Days as Staff', type: 'number' },
         staff_nationality: { label: 'Nationality', type: 'text' },
         assist_auth_start: { label: 'Assist Auth Start', type: 'date' },
@@ -152,8 +200,11 @@ export function getTableConfig(): Record<string, BoardConfig> {
       primaryKey: 'quota_id',
       displayMode: 'table',
       columns: {
+        discord_avatar_url: { label: 'Avatar', type: 'discord_avatar', derived: true },
         quota_id: { label: 'Quota ID', type: 'text', editableOnCreate: true, editableOnUpdate: false },
         profile_id: { label: 'Staff Name', type: 'text', resolveId: true },
+        staff_rank: { label: 'Current Rank', type: 'text', pill: true, derived: true },
+        roblox_username: { label: 'Roblox Username', type: 'text', derived: true },
         quota_level: { label: 'Level', type: 'number' },
         quota_period: { label: 'Period (YYYY-MM)', type: 'text' },
         quota_assist: { label: 'Assists', type: 'number' },
@@ -187,6 +238,84 @@ export function getTableConfig(): Record<string, BoardConfig> {
     },
 
     // ── Session Logs ──────────────────────────────────────────────────
+    session_upcoming: {
+      label: 'Scheduled Sessions',
+      group: 'Session Logs',
+      minLevel: 15,
+      table: 'session_upcoming',
+      primaryKey: 'session_id',
+      displayMode: 'table',
+      readOnly: true,
+      readOnlyReason: 'View only. Use Manage Session(s) to change scheduled sessions.',
+      columns: {
+        session_id: { label: 'Session ID', type: 'number' },
+        session_name: { label: 'Title', type: 'text' },
+        session_status: { label: 'Status', type: 'text', pill: true },
+        session_booked: { label: 'Booked', type: 'bool' },
+        session_date: { label: 'Date', type: 'date' },
+        session_time: { label: 'Time', type: 'text' },
+        session_duration: { label: 'Duration', type: 'text' },
+        num_slots: { label: 'Trainee Slots', type: 'number' },
+        trainer_assignment_mode: { label: 'Trainer Assignment', type: 'text' },
+      },
+    },
+    session_staff: {
+      label: 'Session Staff Assignments',
+      group: 'Session Logs',
+      minLevel: 15,
+      table: 'session_staff',
+      primaryKey: 'staff_row_id',
+      displayMode: 'table',
+      readOnly: true,
+      readOnlyReason: 'View only. Use Manage Session(s) to change staff assignments.',
+      columns: {
+        staff_row_id: { label: 'Row ID', type: 'number' },
+        session_id: { label: 'Session ID', type: 'number' },
+        role: { label: 'Role', type: 'text' },
+        staff_name: { label: 'Staff', type: 'text' },
+        attended: { label: 'Attended', type: 'bool' },
+        notes: { label: 'Notes', type: 'textarea' },
+      },
+    },
+    session_trainees: {
+      label: 'Session Trainee Roster',
+      group: 'Session Logs',
+      minLevel: 15,
+      table: 'session_trainees',
+      primaryKey: 'trainee_row_id',
+      displayMode: 'table',
+      readOnly: true,
+      readOnlyReason: 'View only. Use Manage Session(s) or the live session page to change trainees.',
+      columns: {
+        trainee_row_id: { label: 'Row ID', type: 'number' },
+        session_id: { label: 'Session ID', type: 'number' },
+        slot_number: { label: 'Slot', type: 'number' },
+        is_standby: { label: 'Standby', type: 'bool' },
+        trainee_discord: { label: 'Discord Username', type: 'text' },
+        trainee_roblox_username: { label: 'Roblox Username', type: 'text' },
+        zone: { label: 'Zone', type: 'number' },
+        trainer_name: { label: 'Trainer', type: 'text' },
+        attended: { label: 'Attended', type: 'bool' },
+        note: { label: 'Notes', type: 'textarea' },
+      },
+    },
+    session_drivers: {
+      label: 'Session Drivers',
+      group: 'Session Logs',
+      minLevel: 15,
+      table: 'session_drivers',
+      primaryKey: 'driver_row_id',
+      displayMode: 'table',
+      readOnly: true,
+      readOnlyReason: 'View only. Use Manage Session(s) or the live session page to change drivers.',
+      columns: {
+        driver_row_id: { label: 'Row ID', type: 'number' },
+        session_id: { label: 'Session ID', type: 'number' },
+        discord_username: { label: 'Discord Username', type: 'text' },
+        roblox_username: { label: 'Roblox Username', type: 'text' },
+        attended: { label: 'Attended', type: 'bool' },
+      },
+    },
     session_ongoing: {
       label: 'Live Sessions (Snapshot)',
       group: 'Session Logs',
@@ -201,7 +330,7 @@ export function getTableConfig(): Record<string, BoardConfig> {
         session_id: { label: 'ID', type: 'number' },
         session_name: { label: 'Title', type: 'text' },
         session_status: { label: 'Status', type: 'text', pill: true },
-        host: { label: 'Host', type: 'text' },
+        host: { label: 'Host', type: 'text' }, // Derived from session_staff by the records route.
         session_date: { label: 'Date', type: 'date' },
         session_time: { label: 'Time', type: 'text' },
         num_slots: { label: 'Trainee Slots', type: 'number' },
@@ -241,15 +370,15 @@ export function getTableConfig(): Record<string, BoardConfig> {
       displayMode: 'table',
       columns: {
         session_id: { label: 'Session ID', type: 'number', editableOnUpdate: false },
-        host: { label: 'Host', type: 'text' },
-        cohost_1: { label: 'Co-Host 1', type: 'text' },
-        cohost_2: { label: 'Co-Host 2', type: 'text' },
-        cohost_3: { label: 'Co-Host 3', type: 'text' },
-        cohost_4_supervisor: { label: 'Supervisor', type: 'text' },
-        assistant_1: { label: 'Assistant 1', type: 'text' },
-        assistant_2: { label: 'Assistant 2', type: 'text' },
-        assistant_3: { label: 'Assistant 3', type: 'text' },
-        assistant_4: { label: 'Assistant 4', type: 'text' },
+        host: { label: 'Host', type: 'staff_select' },
+        cohost_1: { label: 'Co-Host 1', type: 'staff_select' },
+        cohost_2: { label: 'Co-Host 2', type: 'staff_select' },
+        cohost_3: { label: 'Co-Host 3', type: 'staff_select' },
+        cohost_4_supervisor: { label: 'Supervisor', type: 'staff_select' },
+        assistant_1: { label: 'Assistant 1', type: 'staff_select' },
+        assistant_2: { label: 'Assistant 2', type: 'staff_select' },
+        assistant_3: { label: 'Assistant 3', type: 'staff_select' },
+        assistant_4: { label: 'Assistant 4', type: 'staff_select' },
         full_staff_json: { label: 'Full Roster', type: 'staff_roster_json' },
       },
     },
@@ -315,6 +444,28 @@ export function getTableConfig(): Record<string, BoardConfig> {
     },
 
     // ── Events (now buildable — schema exists, was a placeholder before) ──
+    event_runs: {
+      label: 'Event Runs (Snapshot)',
+      group: 'Events',
+      minLevel: 15,
+      table: 'event_runs',
+      primaryKey: 'event_run_id',
+      displayMode: 'table',
+      readOnly: true,
+      readOnlyReason: 'View only. Event hosts manage runs in the Event Panel.',
+      columns: {
+        event_run_id: { label: 'Run ID', type: 'number' },
+        source_event_id: { label: 'Event ID', type: 'number' },
+        event_name: { label: 'Title', type: 'text' },
+        event_type: { label: 'Type', type: 'text' },
+        host: { label: 'Host', type: 'text' },
+        status: { label: 'Status', type: 'text', pill: true },
+        event_date: { label: 'Date', type: 'date' },
+        event_time: { label: 'Time', type: 'text' },
+        started_at: { label: 'Started (UTC)', type: 'text' },
+        ended_at: { label: 'Ended (UTC)', type: 'text' },
+      },
+    },
     event_upcoming: {
       label: 'Upcoming Events',
       group: 'Events',

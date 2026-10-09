@@ -5,6 +5,7 @@ import { getAllCards, getVisibleCards } from '@/lib/roles';
 import { createClient } from '@/utils/supabase/server';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { ICONS, type IconKey } from '@/lib/icons';
+import DashboardGreeting from './DashboardGreeting';
 import './dashboard.css';
 
 export const metadata = {
@@ -46,19 +47,40 @@ export default async function DashboardPage() {
     }
   }
 
+  const { data: runningEvents, error: eventError } = await supabase.from('event_runs')
+    .select('event_run_id, host, co_hosts')
+    .eq('status', 'running')
+    .order('started_at', { ascending: false })
+    .limit(20);
+  if (eventError) console.error('event_runs lookup failed:', eventError.message);
+  const myNames = [user.effectiveUsername, user.discordUsername ?? ''].map((name) => name.trim().toLowerCase()).filter(Boolean);
+  const myLiveEvent = (runningEvents ?? []).find((event) => user.effectiveIsAdmin ||
+    myNames.includes(event.host.trim().toLowerCase()) ||
+    (event.co_hosts ?? '').split(/[,;\n]/).some((name: string) => myNames.includes(name.trim().toLowerCase())));
+
   const cards = getVisibleCards({
     rawRole: user.effectiveRole,
     isAdmin: user.effectiveIsAdmin,
     myLiveSessionId,
+    eventHostAuthorized: user.effectiveAuths.eventh_auth,
   }).filter((card) => card.key !== 'feedback' || feedbackAccess !== null);
+  if ((user.effectiveAuths.eventh_auth || user.effectiveAuths.eventch_auth) && !cards.some((card) => card.key === 'manage_events')) {
+    cards.push(getAllCards(myLiveSessionId).manage_events);
+  }
   if (feedbackAccess && !cards.some((card) => card.key === 'feedback')) {
     cards.push(getAllCards(myLiveSessionId).feedback);
   }
+  if (myLiveEvent) {
+    cards.push({ ...getAllCards(myLiveSessionId).event_panel,
+      href: `/eventpanel?event_id=${myLiveEvent.event_run_id}` });
+  }
+  const staffCard = cards.find((card) => card.key === 'staff');
+  if (staffCard) staffCard.wip = !user.isAdmin;
 
   return (
     <>
       <h1 className="section-label">Dashboard</h1>
-      <p className="section-sub">Welcome back, {user.effectiveUsername}.</p>
+      <DashboardGreeting username={user.effectiveUsername} />
 
       <div className="bento-grid">
         {cards.length === 0 ? (

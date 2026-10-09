@@ -7,7 +7,7 @@ html, body {
     font-family: 'Lexend Deca', serif;
     background: #000;
     color: #fff;
-    overflow-x: hidden;
+    overflow-x: clip;
 }
 
 /* ── Blurred background — LOGIN / public pages only ──────────── */
@@ -259,4 +259,80 @@ html, body {
 .gb-popup-scale.visible-lightbox {
   transform: scale(1);
   opacity: 1;
+}
+
+/* Shared status pill, used by session activity and connection notices. */
+.live-pill {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    background: rgba(74, 222, 128, 0.12);
+    border: 1px solid rgba(74, 222, 128, 0.30);
+    color: #4ade80;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+.live-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #4ade80;
+    animation: live-pulse 1.6s ease-out infinite;
+}
+@keyframes live-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.55); }
+    70%  { box-shadow: 0 0 0 8px rgba(74, 222, 128, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+}
+.live-pill-off {
+    background: rgba(255, 255, 255, .05);
+    border-color: rgba(255, 255, 255, 0.10);
+    color: rgba(255, 255, 255, 0.32);
+}
+.live-dot.off {
+    background: rgba(255, 255, 255, .35);
+    animation: none;
+    box-shadow: none;
+}
+.activity-pill-wrap { position: relative; flex: 0 0 auto; }
+.activity-pill { cursor: default; font-family: inherit; }
+.activity-pill:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.activity-pill-details {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 310;
+    width: max-content;
+    min-width: 220px;
+    max-width: min(360px, calc(100vw - 24px));
+    max-height: 320px;
+    overflow: auto;
+    padding: 10px 12px;
+    border: 1px solid rgba(255,255,255,.18);
+    border-radius: 12px;
+    background: #1b1b1b;
+    box-shadow: 0 12px 32px rgba(0,0,0,.45);
+    color: #eee;
+    font-size: .75rem;
+    line-height: 1.5;
+    white-space: normal;
+}
+.activity-pill-details div + div { border-top: 1px solid rgba(255,255,255,.12); margin-top: 6px; padding-top: 6px; }
+.activity-pill-wrap:hover .activity-pill-details,
+.activity-pill-wrap:focus-within .activity-pill-details { display: block; }
+
+/* Keep page toasts above the connection notice when both are visible. */
+body:has(> [data-connection-toast] [data-toast]) [data-toast-stack]:not([data-connection-stack]) {
+    bottom: 110px;
+}
+@media (max-width: 640px) {
+    body:has(> [data-connection-toast] [data-toast]) [data-toast-stack]:not([data-connection-stack]) {
+        bottom: 170px;
+    }
 }

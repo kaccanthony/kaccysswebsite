@@ -11,7 +11,8 @@ import { getRoleColor } from '@/lib/roles';
 import { labelForRank } from '@/lib/viewAs/rankMap';
 import { stopViewAs } from '@/app/actions/viewAs';
 import { LiveSessionProvider } from './LiveSessionContext';
-import LiveStatusPill from './LiveStatusPill';
+import OngoingActivityPill from './OngoingActivityPill';
+import type { OngoingActivity } from '@/lib/ongoingActivity';
 import type { ViewAsState } from '@/lib/getCurrentUser';
 import './appshell.css';
 
@@ -41,6 +42,8 @@ interface AppShellProps {
   /** Persisted session_ongoing.last_updated timestamp (epoch ms). */
   liveSessionLastChangeAt?: number | null;
   serverNow?: number;
+  ongoingActivity?: OngoingActivity;
+  headerLeading?: React.ReactNode;
   children: React.ReactNode;
 }
 
@@ -56,7 +59,7 @@ export default function AppShell(props: AppShellProps) {
   );
 }
 
-function AppShellInner({ user, assignedSessions, unreadCount, viewingAs = null, children }: AppShellProps) {
+function AppShellInner({ user, assignedSessions, unreadCount, viewingAs = null, ongoingActivity = { sessions: [], events: [] }, headerLeading, children }: AppShellProps) {
   const [open, setOpen] = useState(false);
   const [hidden, setHidden] = useState(false);
   const [exitingViewAs, setExitingViewAs] = useState(false);
@@ -164,6 +167,8 @@ function AppShellInner({ user, assignedSessions, unreadCount, viewingAs = null, 
           <span className="app-name">YSS Central</span>
         </Link>
 
+        {headerLeading}
+
         {viewingAs && (
           <div className="topbar-center">
             <div className="viewas-pill">
@@ -177,9 +182,7 @@ function AppShellInner({ user, assignedSessions, unreadCount, viewingAs = null, 
         )}
 
         <div className="topbar-right">
-          {/* No longer gated to isActiveRoute — status is now seeded server-side (see
-              layout.tsx's hasLiveSession), so it's correct on every page, not just /active. */}
-          <LiveStatusPill />
+          <OngoingActivityPill initialActivity={ongoingActivity} />
           <Link href="/notifications" className="bell-btn" aria-label="Notifications">
 
             <FontAwesomeIcon icon={faBell} />

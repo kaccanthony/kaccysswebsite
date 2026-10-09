@@ -84,6 +84,7 @@ CREATE TABLE public.staff_archived (
   staff_name character varying NOT NULL,
   staff_display_name character varying NOT NULL,
   staff_roblox_name character varying NOT NULL,
+  staff_roblox_id bigint,
   staff_nationality character varying,
   staff_rank character varying NOT NULL,
   staff_days integer NOT NULL,

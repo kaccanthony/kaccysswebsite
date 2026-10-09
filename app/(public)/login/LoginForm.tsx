@@ -2,6 +2,7 @@
 // FILE: app/(public)/login/LoginForm.tsx
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCircleCheck } from '@fortawesome/free-solid-svg-icons';
 import { createClient } from '@/utils/supabase/client';
@@ -150,6 +151,7 @@ export default function LoginForm({
             ? 'Just Roblox left — both are required before you can access the dashboard.'
             : "You'll sign in with Discord, then link your Roblox account — both are required before you can access the dashboard."}
         </p>
+        <p className="login-note"><Link href="/staff">Meet the staff and view the Hall of Fame</Link></p>
       </div>
     </>
   );

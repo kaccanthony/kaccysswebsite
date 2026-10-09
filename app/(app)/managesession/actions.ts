@@ -114,6 +114,25 @@ export async function saveSession(formData: FormData): Promise<SessionActionResu
   if (!/^\d{2}:\d{2}$/.test(sessionTime)) return failure('Invalid or missing session time.');
 
   const supabase = await createClient();
+  const links = {
+    event_link: String(formData.get('event_link') ?? '').trim() || null,
+    forum_link: String(formData.get('forum_link') ?? '').trim() || null,
+    private_server_link: String(formData.get('private_server_link') ?? '').trim() || null,
+  };
+  for (const [name, value] of Object.entries(links)) {
+    if (!value) continue;
+    try {
+      const url = new URL(value);
+      if (!['https:', 'http:'].includes(url.protocol) || value.length > 2048) throw new Error('Invalid link');
+    } catch {
+      return failure(`${name.replaceAll('_', ' ')} must be an http(s) URL under 2048 characters.`);
+    }
+  }
+  const { error: linkSchemaError } = await supabase.from('session_upcoming')
+    .select('event_link, forum_link, private_server_link').limit(0);
+  if (linkSchemaError && Object.values(links).some(Boolean)) {
+    return failure('Session links are not ready in Supabase. Apply database/session_script_links.sql first.');
+  }
 
   // ── session_upcoming holds ONLY its own real columns now — no staff or
   // trainee data lives here anymore. ──
@@ -128,6 +147,7 @@ export async function saveSession(formData: FormData): Promise<SessionActionResu
     session_date: sessionDate,
     session_time: sessionTime,
     additional_notes: (formData.get('additional_notes') as string) || null,
+    ...(!linkSchemaError ? links : {}),
   };
 
   let sessionId: number;
@@ -243,7 +263,7 @@ export async function updateSiteTimezone(formData: FormData) {
   revalidatePath('/', 'layout');
   revalidatePath('/manage');
   revalidatePath('/managesession');
-  revalidatePath('/upcomingsesh');
+  revalidatePath('/upcoming');
   revalidatePath('/setupsesh');
   redirect(`/manage?panel=timezone&success=${encodeURIComponent(`Site timezone changed to ${timezoneMode}.`)}`);
 }

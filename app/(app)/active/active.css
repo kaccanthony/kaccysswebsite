@@ -18,6 +18,7 @@ main{position:relative;z-index:1;padding:calc(var(--header-h) + 26px) 28px 60px;
 .guest-topbar{position:fixed;top:0;left:0;right:0;z-index:100;height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;background:linear-gradient(135deg,rgba(18,18,18,.90),rgba(12,12,12,.86));backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);border-bottom:1px solid rgba(255,255,255,.14);}
 .guest-brand{display:flex;align-items:center;gap:12px;color:rgba(255,255,255,.9);text-decoration:none;font-family:'Libre Baskerville',serif;font-size:1rem;font-weight:600;}
 .guest-brand img{width:36px;height:36px;border-radius:50%;object-fit:cover;}
+.guest-topbar-right{display:flex;align-items:center;gap:12px;}
 .guest-profile{position:relative;}
 .guest-profile summary{list-style:none;display:flex;align-items:center;gap:10px;padding:6px 12px 6px 7px;border:1px solid rgba(255,255,255,.16);border-radius:12px;background:rgba(255,255,255,.06);cursor:pointer;}
 .guest-profile summary::-webkit-details-marker{display:none;}
@@ -39,11 +40,6 @@ main{position:relative;z-index:1;padding:calc(var(--header-h) + 26px) 28px 60px;
 .session-head{margin-bottom:0;}
 .session-title{font-family:'Libre Baskerville',serif;font-size:1.5rem;font-weight:600;}
 .session-sub{font-size:.78rem;color:var(--text-dim);margin-top:4px;}
-
-/* live-pill / live-dot / sync-note / live-status live in ../appshell.css now —
-   they're shared between this page and AppShell's header (same <LiveStatusPill/>
-   component renders in both places), so defining them here too would just
-   create two competing rule sets loaded on the same page. */
 
 @media (max-width:640px){
     .session-topbar{flex-direction:column;align-items:stretch;}

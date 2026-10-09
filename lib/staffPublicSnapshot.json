@@ -1,0 +1,340 @@
+{
+  "1007312984244224040": {
+    "roblox_id": 933057051,
+    "operations": {
+      "weighted_contribution": 1.35275,
+      "consistency": 1.35275,
+      "leadership_ratio": 0.0,
+      "power_score": 1.0822,
+      "power_rank": 11.0,
+      "sessions_attended": 2
+    },
+    "community": {},
+    "discord_id": "1007312984244224040",
+    "source_as_of": "2026-10-09"
+  },
+  "1089179220212715550": {
+    "roblox_id": 3058858657,
+    "operations": {
+      "weighted_contribution": 1.369659,
+      "consistency": 1.369659,
+      "leadership_ratio": 0.0,
+      "power_score": 1.095727,
+      "power_rank": 10.0,
+      "sessions_attended": 9
+    },
+    "community": {},
+    "discord_id": "1089179220212715550",
+    "source_as_of": "2026-10-09"
+  },
+  "1144620459267211295": {
+    "roblox_id": null,
+    "operations": {},
+    "community": {},
+    "discord_id": "1144620459267211295",
+    "source_as_of": "2026-10-09"
+  },
+  "1155435768580423700": {
+    "roblox_id": 4299627526,
+    "operations": {
+      "weighted_contribution": 1.016681,
+      "consistency": 1.080223,
+      "leadership_ratio": 0.0,
+      "power_score": 0.832407,
+      "power_rank": 12.0,
+      "sessions_attended": 17
+    },
+    "community": {},
+    "discord_id": "1155435768580423700",
+    "source_as_of": "2026-10-09"
+  },
+  "1172924379135492238": {
+    "roblox_id": 482379201,
+    "operations": {
+      "weighted_contribution": 3.255281,
+      "consistency": 1.73615,
+      "leadership_ratio": 0.392857,
+      "power_score": 10.005628,
+      "power_rank": 5.0,
+      "sessions_attended": 32
+    },
+    "community": {
+      "runtime_hours": 0.0,
+      "weighted_hosting": 0.0,
+      "average_turnout": 0.0,
+      "tag_versatility": 0.0,
+      "department_power_ranking": 0.0,
+      "power_rank": 10.0
+    },
+    "discord_id": "1172924379135492238",
+    "source_as_of": "2026-10-09"
+  },
+  "1226496755764559872": {
+    "roblox_id": 7556638019,
+    "operations": {},
+    "community": {
+      "runtime_hours": 3.96,
+      "weighted_hosting": 7.0,
+      "average_turnout": 0.0,
+      "tag_versatility": 0.2,
+      "department_power_ranking": 42.474603,
+      "power_rank": 7.0
+    },
+    "discord_id": "1226496755764559872",
+    "source_as_of": "2026-10-09"
+  },
+  "1233819553562103918": {
+    "roblox_id": 2054658865,
+    "operations": {
+      "weighted_contribution": 0.552143,
+      "consistency": 1.656429,
+      "leadership_ratio": 0.0,
+      "power_score": 0.773,
+      "power_rank": 14.0,
+      "sessions_attended": 24
+    },
+    "community": {
+      "runtime_hours": 0.0,
+      "weighted_hosting": 0.0,
+      "average_turnout": 0.0,
+      "tag_versatility": 0.0,
+      "department_power_ranking": 0.0,
+      "power_rank": 10.0
+    },
+    "discord_id": "1233819553562103918",
+    "source_as_of": "2026-10-09"
+  },
+  "1289533889815253073": {
+    "roblox_id": 5016412795,
+    "operations": {
+      "weighted_contribution": 3.739684,
+      "consistency": 3.168344,
+      "leadership_ratio": 0.92,
+      "power_score": 21.220345,
+      "power_rank": 1.0,
+      "sessions_attended": 61
+    },
+    "community": {
+      "runtime_hours": 3.81,
+      "weighted_hosting": 5.0,
+      "average_turnout": 7.0,
+      "tag_versatility": 0.2,
+      "department_power_ranking": 60.807176,
+      "power_rank": 5.0
+    },
+    "discord_id": "1289533889815253073",
+    "source_as_of": "2026-10-09"
+  },
+  "1355223896261136584": {
+    "roblox_id": 7114642092,
+    "operations": {
+      "weighted_contribution": 2.605244,
+      "consistency": 1.906276,
+      "leadership_ratio": 0.086957,
+      "power_score": 3.613635,
+      "power_rank": 7.0,
+      "sessions_attended": 30
+    },
+    "community": {
+      "runtime_hours": 6.98,
+      "weighted_hosting": 11.0,
+      "average_turnout": 3.0,
+      "tag_versatility": 0.2,
+      "department_power_ranking": 81.25,
+      "power_rank": 2.0
+    },
+    "discord_id": "1355223896261136584",
+    "source_as_of": "2026-10-09"
+  },
+  "1378997661562175518": {
+    "roblox_id": null,
+    "operations": {},
+    "community": {},
+    "discord_id": "1378997661562175518",
+    "source_as_of": "2026-10-09"
+  },
+  "1443891124233048176": {
+    "roblox_id": 2284184939,
+    "operations": {},
+    "community": {
+      "runtime_hours": 3.67,
+      "weighted_hosting": 8.0,
+      "average_turnout": 8.0,
+      "tag_versatility": 0.2,
+      "department_power_ranking": 74.864548,
+      "power_rank": 3.0
+    },
+    "discord_id": "1443891124233048176",
+    "source_as_of": "2026-10-09"
+  },
+  "479880148842184725": {
+    "roblox_id": 2782072956,
+    "operations": {
+      "weighted_contribution": 5.23823,
+      "consistency": 2.646685,
+      "leadership_ratio": 0.439024,
+      "power_score": 12.193608,
+      "power_rank": 4.0,
+      "sessions_attended": 48
+    },
+    "community": {
+      "runtime_hours": 2.56,
+      "weighted_hosting": 6.0,
+      "average_turnout": 7.5,
+      "tag_versatility": 0.4,
+      "department_power_ranking": 60.946047,
+      "power_rank": 4.0
+    },
+    "discord_id": "479880148842184725",
+    "source_as_of": "2026-10-09"
+  },
+  "707604709099307009": {
+    "roblox_id": 6043809252,
+    "operations": {
+      "weighted_contribution": 1.832878,
+      "consistency": 1.555169,
+      "leadership_ratio": 0.117647,
+      "power_score": 3.735931,
+      "power_rank": 6.0,
+      "sessions_attended": 28
+    },
+    "community": {
+      "runtime_hours": 4.2,
+      "weighted_hosting": 9.0,
+      "average_turnout": 0.0,
+      "tag_versatility": 0.2,
+      "department_power_ranking": 50.778849,
+      "power_rank": 6.0
+    },
+    "discord_id": "707604709099307009",
+    "source_as_of": "2026-10-09"
+  },
+  "753274076323119125": {
+    "roblox_id": 347756438,
+    "operations": {
+      "weighted_contribution": 5.401766,
+      "consistency": 3.012523,
+      "leadership_ratio": 0.585366,
+      "power_score": 15.311957,
+      "power_rank": 2.0,
+      "sessions_attended": 58
+    },
+    "community": {
+      "runtime_hours": 6.06,
+      "weighted_hosting": 11.0,
+      "average_turnout": 4.5,
+      "tag_versatility": 0.4,
+      "department_power_ranking": 82.920845,
+      "power_rank": 1.0
+    },
+    "discord_id": "753274076323119125",
+    "source_as_of": "2026-10-09"
+  },
+  "759646190999961621": {
+    "roblox_id": null,
+    "operations": {
+      "sessions_attended": 18
+    },
+    "community": {},
+    "discord_id": "759646190999961621",
+    "source_as_of": "2026-10-09"
+  },
+  "775004984352964608": {
+    "roblox_id": 303351913,
+    "operations": {
+      "weighted_contribution": 2.493123,
+      "consistency": 2.181483,
+      "leadership_ratio": 0.578947,
+      "power_score": 13.479954,
+      "power_rank": 3.0,
+      "sessions_attended": 42
+    },
+    "community": {
+      "runtime_hours": 1.56,
+      "weighted_hosting": 3.0,
+      "average_turnout": 4.0,
+      "tag_versatility": 0.2,
+      "department_power_ranking": 32.613962,
+      "power_rank": 8.0
+    },
+    "discord_id": "775004984352964608",
+    "source_as_of": "2026-10-09"
+  },
+  "775666746093862952": {
+    "roblox_id": 3013938431,
+    "operations": {
+      "weighted_contribution": 0.608738,
+      "consistency": 0.608738,
+      "leadership_ratio": 0.0,
+      "power_score": 0.48699,
+      "power_rank": 15.0,
+      "sessions_attended": 4
+    },
+    "community": {},
+    "discord_id": "775666746093862952",
+    "source_as_of": "2026-10-09"
+  },
+  "779274835213156363": {
+    "roblox_id": 1508313419,
+    "operations": {
+      "weighted_contribution": 0.953138,
+      "consistency": 1.080223,
+      "leadership_ratio": 0.0,
+      "power_score": 0.800636,
+      "power_rank": 13.0,
+      "sessions_attended": 17
+    },
+    "community": {},
+    "discord_id": "779274835213156363",
+    "source_as_of": "2026-10-09"
+  },
+  "786911272351956993": {
+    "roblox_id": 5146219241,
+    "operations": {
+      "weighted_contribution": 2.24849,
+      "consistency": 2.24849,
+      "leadership_ratio": 0.045455,
+      "power_score": 2.707883,
+      "power_rank": 8.0,
+      "sessions_attended": 41
+    },
+    "community": {
+      "runtime_hours": 2.43,
+      "weighted_hosting": 4.0,
+      "average_turnout": 0.0,
+      "tag_versatility": 0.0,
+      "department_power_ranking": 24.989581,
+      "power_rank": 9.0
+    },
+    "discord_id": "786911272351956993",
+    "source_as_of": "2026-10-09"
+  },
+  "928892932625416242": {
+    "roblox_id": 1146139311,
+    "operations": {
+      "weighted_contribution": 3.617136,
+      "consistency": 2.205571,
+      "leadership_ratio": 0.0,
+      "power_score": 2.470239,
+      "power_rank": 9.0,
+      "sessions_attended": 25
+    },
+    "community": {},
+    "discord_id": "928892932625416242",
+    "source_as_of": "2026-10-09"
+  },
+  "977611575512944651": {
+    "roblox_id": 2918662281,
+    "operations": {
+      "weighted_contribution": 0.0,
+      "consistency": 0.0,
+      "leadership_ratio": 0.0,
+      "power_score": 0.0,
+      "power_rank": 16.0,
+      "sessions_attended": 0
+    },
+    "community": {},
+    "discord_id": "977611575512944651",
+    "source_as_of": "2026-10-09"
+  }
+}

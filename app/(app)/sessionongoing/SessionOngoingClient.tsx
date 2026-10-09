@@ -32,6 +32,7 @@ import { formatInstantInSiteTimezone, type SiteTimezoneMode } from '@/lib/siteTi
 import { countSessionTraineeSlots, isWithinSessionTraineeLimit, MAX_SESSION_TRAINEES, SESSION_TRAINEE_LIMIT_MESSAGE } from '@/lib/session/traineeLimit';
 import FeedbackImages, { type FeedbackImage } from './FeedbackImages';
 import { getSessionControlAccess } from '@/lib/session/controlPermissions';
+import { BRIEFING_SCRIPT, DEFAULT_BRIEFING_CLOSING_LINE } from '@/lib/session/briefing-script';
 
 const TRAINEE_COLUMNS = [
   { n: 1, label: 'Pop-out', minWidth: 70, maxWidth: 80, width: 74 },
@@ -201,6 +202,55 @@ function ScriptPreview({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function BriefingScriptPip({ win, onCopyError }: { win: Window; onCopyError: () => void }) {
+  const [copiedLine, setCopiedLine] = useState<string | null>(null);
+  const [closingLine, setClosingLine] = useState(DEFAULT_BRIEFING_CLOSING_LINE);
+
+  async function copyLine(key: string, value: string) {
+    try {
+      await win.navigator.clipboard.writeText(value);
+      setCopiedLine(key);
+      win.setTimeout(() => setCopiedLine((current) => current === key ? null : current), 1200);
+    } catch {
+      onCopyError();
+    }
+  }
+
+  return (
+    <div className={styles.briefingPip}>
+      <h1><FontAwesomeIcon icon={ICONS.scroll} /> Host / Co-host Script</h1>
+      <p className={styles.briefingPipIntro}>Copy one message at a time during the briefing.</p>
+      {BRIEFING_SCRIPT.map((section) => (
+        <section key={section.title} className={styles.briefingSection}>
+          <h2>{section.title}</h2>
+          {'hint' in section && <p className={styles.briefingHint}>{section.hint}</p>}
+          {section.lines.map((line, index) => {
+            const key = `${section.title}-${index}`;
+            return (
+              <div key={key} className={styles.briefingLine}>
+                <p>{line}</p>
+                <button type="button" title="Copy this message" aria-label={`Copy ${section.title} message ${index + 1}`} onClick={() => void copyLine(key, line)}>
+                  <FontAwesomeIcon icon={copiedLine === key ? ICONS.check : ICONS.copy} />
+                </button>
+              </div>
+            );
+          })}
+        </section>
+      ))}
+      <section className={styles.briefingSection}>
+        <h2>Closing line</h2>
+        <p className={styles.briefingHint}>Say whatever you like to wish everyone well.</p>
+        <div className={styles.briefingLine}>
+          <input aria-label="Closing line" value={closingLine} onChange={(event) => setClosingLine(event.target.value)} />
+          <button type="button" title="Copy closing line" aria-label="Copy closing line" disabled={!closingLine.trim()} onClick={() => void copyLine('closing', closingLine.trim())}>
+            <FontAwesomeIcon icon={copiedLine === 'closing' ? ICONS.check : ICONS.copy} />
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -413,6 +463,7 @@ export default function SessionOngoingClient(props: Props) {
   const [completedRows, setCompletedRows] = useState<Record<string, boolean>>(initialLiveState.completedRows ?? {});
   const [unallocated, setUnallocated] = useState<UnallocatedTrainee[]>(initialLiveState.unallocatedTrainees ?? []);
   const [timeTracker, setTimeTracker] = useState<TimeTracker>(initialLiveState.timeTracker ?? {});
+  const briefingAvailable = (isHost || isCoHost) && timeTracker.briefingStart != null && timeTracker.sgShiftStart == null;
   const [mainAstNotes, setMainAstNotes] = useState(initialLiveState.mainAstNotes ?? '');
   const [statusValue, setStatusValue] = useState((session.session_status || 'inprogress').toLowerCase().replace(/\s+/g, ''));
   // Attendance wasn't wired to state in the initial port — bare checkbox, visual only.
@@ -1178,7 +1229,7 @@ export default function SessionOngoingClient(props: Props) {
   // (with live state/handlers) rather than the original's manual
   // innerHTML + addEventListener wiring.
   const [pipWindow, setPipWindow] = useState<Window | null>(null);
-  const [pipKind, setPipKind] = useState<'trainee' | 'timer' | null>(null);
+  const [pipKind, setPipKind] = useState<'trainee' | 'timer' | 'briefing' | null>(null);
   const [pipRow, setPipRow] = useState<string | null>(null);
   const [pipCopyFlash, setPipCopyFlash] = useState(false);
   const [pipScriptVisible, setPipScriptVisible] = useState(false);
@@ -1186,7 +1237,7 @@ export default function SessionOngoingClient(props: Props) {
 
   const pipSupported = useCallback(() => typeof window !== 'undefined' && 'documentPictureInPicture' in window, []);
 
-  const openPip = useCallback(async (kind: 'trainee' | 'timer', row: string, opts: { width: number; height: number; title: string }) => {
+  const openPip = useCallback(async (kind: 'trainee' | 'timer' | 'briefing', row: string, opts: { width: number; height: number; title: string }) => {
     if (!pipSupported()) {
       showToast('Real pop-out windows need Chrome or Edge (Document Picture-in-Picture). This browser doesn\u2019t support it.');
       return;
@@ -1235,6 +1286,12 @@ export default function SessionOngoingClient(props: Props) {
 
   const openTraineePip = useCallback((row: string) => { openPip('trainee', row, { width: 320, height: 560, title: 'Trainee pop-out' }); }, [openPip]);
   const openTimerPip = useCallback((row: string) => { openPip('timer', row, { width: 220, height: 210, title: 'Timer pop-out' }); }, [openPip]);
+  const openBriefingPip = useCallback(() => {
+    if (briefingAvailable) void openPip('briefing', 'host-script', { width: 440, height: 660, title: 'Host / Co-host Briefing Script' });
+  }, [briefingAvailable, openPip]);
+  useEffect(() => {
+    if (!briefingAvailable && pipKind === 'briefing' && pipWindow && !pipWindow.closed) pipWindow.close();
+  }, [briefingAvailable, pipKind, pipWindow]);
 
   const removeAllocatedTrainee = useCallback((row: string) => {
     if (locked.trainees) return;
@@ -2471,6 +2528,14 @@ Thank you for attending.`;
         </div>
       )}
 
+      {briefingAvailable && (
+        <div className={styles.briefingWidget}>
+          <button type="button" className={styles.briefingFab} title="Open host briefing script" aria-label="Open host briefing script" onClick={openBriefingPip}>
+            <FontAwesomeIcon icon={ICONS.scroll} />
+          </button>
+        </div>
+      )}
+
       {/* ── Incoming announcement — banner variant ── */}
       <div className={`${styles.announceBanner} ${announceBanner ? styles.show : ''}`}>
         <span>{announceBanner}</span>
@@ -2685,6 +2750,12 @@ Thank you for attending.`;
           </div>
         );
       })()}
+
+      {/* ── Host/co-host briefing pop-out (Document PiP) ── */}
+      {pipWindow && pipKind === 'briefing' && briefingAvailable && createPortal(
+        <BriefingScriptPip win={pipWindow} onCopyError={() => showToast('Could not copy briefing message. Check clipboard permissions.', 'warning')} />,
+        pipWindow.document.body
+      )}
 
       {/* ── Trainee pop-out (Document PiP) ── */}
       {pipWindow && pipKind === 'trainee' && pipRow !== null && createPortal(

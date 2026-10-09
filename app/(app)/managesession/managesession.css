@@ -256,6 +256,55 @@
 }
 .modal-box.modal-sm { width: min(420px, 100%); }
 
+.script-backdrop {
+    position: fixed;
+    inset: 64px 0 0;
+    z-index: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(0, 0, 0, .72);
+    backdrop-filter: blur(8px);
+}
+.script-window {
+    width: min(1000px, 100%);
+    max-height: min(82vh, 800px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,.18);
+    border-radius: 18px;
+    background: #17191d;
+    box-shadow: 0 24px 70px rgba(0,0,0,.65);
+}
+.script-window-header, .script-preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+.script-window-header { padding: 18px 20px; border-bottom: 1px solid rgba(255,255,255,.1); }
+.script-window-header > div { display: flex; flex-direction: column; gap: 4px; }
+.script-window-header strong { color: #fff; font-size: 1rem; }
+.script-window-header span { color: rgba(255,255,255,.55); font-size: .78rem; }
+.script-window-body { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 0; flex: 1; }
+.script-tabs { display: flex; flex-direction: column; gap: 4px; padding: 12px; overflow-y: auto; border-right: 1px solid rgba(255,255,255,.1); }
+.script-tabs button { text-align: left; padding: 10px 12px; border: 0; border-radius: 8px; background: transparent; color: rgba(255,255,255,.65); font: inherit; font-size: .8rem; cursor: pointer; }
+.script-tabs button:hover, .script-tabs button.active { background: rgba(90,180,255,.14); color: #a8d8ff; }
+.script-preview-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 16px; }
+.script-preview-header { margin-bottom: 12px; color: #fff; }
+.script-preview-header .btn-primary { white-space: nowrap; }
+.script-link-note { margin: 0 0 10px; color: #ffcc80; font-size: .78rem; }
+.script-preview { flex: 1; min-height: 120px; margin: 0; padding: 18px; overflow: auto; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; background: rgba(0,0,0,.25); color: #e9edf2; font: .84rem/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+@media (max-width: 680px) {
+    .script-window-body { grid-template-columns: 1fr; }
+    .script-tabs { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid rgba(255,255,255,.1); }
+    .script-tabs button { flex: 0 0 auto; max-width: 180px; }
+    .script-preview-panel { overflow: hidden; }
+    .script-preview-header { align-items: flex-start; flex-direction: column; }
+}
+
 .modal-header {
     display: flex; align-items: center; justify-content: space-between;
     margin-bottom: 18px;

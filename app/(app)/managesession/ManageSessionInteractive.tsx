@@ -18,6 +18,8 @@ import { useModalVisibility } from '@/lib/useModalVisibility';
 import type { SiteTimezoneMode } from '@/lib/siteTimezone';
 import { findDuplicateAssignments } from './duplicateAssignments';
 import { countSessionTraineeSlots, MAX_SESSION_TRAINEES } from '@/lib/session/traineeLimit';
+import type { SessionScriptSource } from '@/lib/sessionScripts';
+import SessionScriptsDialog from './SessionScriptsDialog';
 
 const DRAFT_KEY = 'managesession_draft';
 const SESSION_VIRTUALIZATION_THRESHOLD = 50;
@@ -31,6 +33,7 @@ function DuplicateWarning({ visible, label }: { visible: boolean; label: string 
 
 export interface StaffOption {
   name: string;
+  discordId?: string | null;
   staff_rank: string;
   op_dept: boolean;
   host_auth: boolean;
@@ -74,6 +77,9 @@ export interface SessionRow {
   trainee_timer: number;
   trainer_assignment_mode: string;
   additional_notes: string | null;
+  event_link?: string | null;
+  forum_link?: string | null;
+  private_server_link?: string | null;
   staffRows: StaffChildRow[];
   traineeRows: TraineeChildRow[];
 }
@@ -212,6 +218,7 @@ const SessionTableRow = memo(function SessionTableRow({
   canManage,
   canDelete,
   onEdit,
+  onScripts,
   onDelete,
   timezoneMode,
   virtualIndex,
@@ -221,12 +228,14 @@ const SessionTableRow = memo(function SessionTableRow({
   canManage: boolean;
   canDelete: boolean;
   onEdit: (session: SessionRow) => void;
+  onScripts: (session: SessionRow) => void;
   onDelete: (session: SessionRow) => void;
   timezoneMode: SiteTimezoneMode;
   virtualIndex?: number;
   measureElement?: (node: HTMLTableRowElement | null) => void;
 }) {
   const handleEdit = useCallback(() => onEdit(session), [onEdit, session]);
+  const handleScripts = useCallback(() => onScripts(session), [onScripts, session]);
   const handleDelete = useCallback(() => onDelete(session), [onDelete, session]);
   const filled = useMemo(
     () => session.traineeRows.reduce((count, trainee) => count + (trainee.is_standby ? 0 : 1), 0),
@@ -272,6 +281,9 @@ const SessionTableRow = memo(function SessionTableRow({
         <td className="td-actions">
           <div className="td-actions-inner">
             <QuickAddTrainee sessionId={session.session_id} />
+            <button className="action-btn" type="button" title="Session messages" aria-label={`Messages for ${session.session_name || `session ${session.session_id}`}`} onClick={handleScripts}>
+              <FontAwesomeIcon icon={faClipboard} />
+            </button>
             <button className="action-btn" title="Edit" onClick={handleEdit}>
               <FontAwesomeIcon icon={faPen} />
             </button>
@@ -292,6 +304,7 @@ function SessionTable({
   canManage,
   canDelete,
   onEdit,
+  onScripts,
   onDelete,
   timezoneMode,
 }: {
@@ -299,6 +312,7 @@ function SessionTable({
   canManage: boolean;
   canDelete: boolean;
   onEdit: (session: SessionRow) => void;
+  onScripts: (session: SessionRow) => void;
   onDelete: (session: SessionRow) => void;
   timezoneMode: SiteTimezoneMode;
 }) {
@@ -348,6 +362,7 @@ function SessionTable({
                     canManage={canManage}
                     canDelete={canDelete}
                     onEdit={onEdit}
+                    onScripts={onScripts}
                     onDelete={onDelete}
                     timezoneMode={timezoneMode}
                     virtualIndex={virtualRow.index}
@@ -369,6 +384,7 @@ function SessionTable({
                 canManage={canManage}
                 canDelete={canDelete}
                 onEdit={onEdit}
+                onScripts={onScripts}
                 onDelete={onDelete}
                 timezoneMode={timezoneMode}
               />
@@ -396,6 +412,10 @@ export default function ManageSessionInteractive({
   const [modalOpen, setModalOpen] = useState(false);
   const { shouldRender, visible } = useModalVisibility(modalOpen);
   const [editing, setEditing] = useState<SessionRow | null>(null);
+  const [scriptSession, setScriptSession] = useState<SessionScriptSource | null>(null);
+  const discordIdsByName = useMemo(() => Object.fromEntries(staff
+    .filter(option => option.discordId)
+    .map(option => [option.name.toLowerCase(), option.discordId!])), [staff]);
   const [numSlots, setNumSlots] = useState(4);
   const [reservedSlots, setReservedSlots] = useState(0);
   const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
@@ -533,6 +553,36 @@ export default function ManageSessionInteractive({
   const requestDelete = useCallback((session: SessionRow) => {
     setDeleteTarget({ id: session.session_id, name: session.session_name || 'this session' });
   }, []);
+
+  function openScriptsFromForm() {
+    if (!formRef.current) return;
+    const form = new FormData(formRef.current);
+    const value = (name: string) => String(form.get(name) ?? '').trim();
+    const roles: [string, string][] = [
+      ['HOST', 'host'], ['CH_1', 'co_host1'], ['CH_2', 'co_host2'], ['CH_3', 'co_host3'],
+      ['CH_4', 'co_host4_supervisor'], ['AST_1', 'assistant_1'], ['AST_2', 'assistant_2'],
+      ['AST_3', 'assistant_3'], ['AST_4', 'assistant_4'],
+    ];
+    const staffRows = roles.filter(([, field]) => value(field)).map(([role, field]) => ({ role, staff_name: value(field) }));
+    staffRows.push(...additionalStaffRows.filter(row => row.name.trim()).map(row => ({ role: `Add T. ${row.role}`, staff_name: row.name.trim() })));
+    const traineeRows = Array.from({ length: numSlots + reservedSlots }, (_, index) => ({
+      is_standby: index >= numSlots,
+      trainee_roblox_username: value(`trainee_${index + 1}_roblox`) || null,
+      trainee_discord: value(`trainee_${index + 1}_discord`) || null,
+    }));
+    setScriptSession({
+      session_name: value('session_name') || null,
+      session_date: value('session_date'),
+      session_time: value('session_time'),
+      session_duration: value('session_duration') || null,
+      num_slots: numSlots,
+      event_link: value('event_link') || null,
+      forum_link: value('forum_link') || null,
+      private_server_link: value('private_server_link') || null,
+      staffRows,
+      traineeRows,
+    });
+  }
 
   function handleTimeChange(e: React.ChangeEvent<HTMLInputElement>) {
     setTimeDigits(e.target.value.replace(/\D/g, '').slice(0, 4));
@@ -861,6 +911,7 @@ export default function ManageSessionInteractive({
           canManage={permLevel >= 10}
           canDelete={permLevel >= 15}
           onEdit={openEdit}
+          onScripts={setScriptSession}
           onDelete={requestDelete}
           timezoneMode={timezoneMode}
         />
@@ -876,6 +927,7 @@ export default function ManageSessionInteractive({
               </div>
 
               <form
+                key={editing?.session_id ?? 'new'}
                 ref={formRef}
                 action={handleSave}
                 onChange={handleFormChange}
@@ -977,6 +1029,11 @@ export default function ManageSessionInteractive({
                     <input type="number" name="trainee_timer" min={8} max={20} placeholder="15" defaultValue={editing?.trainee_timer ?? ''} />
                   </div>
                 </div>
+
+                <div className="form-divider"><span>Message Links</span></div>
+                <div className="form-group"><label>Event Link</label><input type="url" name="event_link" placeholder="https://..." defaultValue={editing?.event_link ?? ''} /></div>
+                <div className="form-group"><label>Signup Forum Link</label><input type="url" name="forum_link" placeholder="https://..." defaultValue={editing?.forum_link ?? ''} /></div>
+                <div className="form-group"><label>Private Server Link</label><input type="url" name="private_server_link" placeholder="https://..." defaultValue={editing?.private_server_link ?? ''} /></div>
 
                 <div className="form-divider"><span>Staff Assignment</span></div>
 
@@ -1196,6 +1253,7 @@ export default function ManageSessionInteractive({
 
                 <div className="modal-footer">
                   <button type="button" className="btn-ghost" onClick={() => setModalOpen(false)}>Cancel</button>
+                  <button type="button" className="btn-ghost" onClick={openScriptsFromForm}><FontAwesomeIcon icon={faClipboard} /> Preview messages</button>
                   <button type="submit" className="btn-primary" disabled={duplicateFields.size > 0} title={duplicateFields.size > 0 ? 'Remove duplicate assignments before saving.' : undefined}>{editing ? 'Save Changes' : isRequestMode ? 'Submit Request' : 'Add Session'}</button>
                 </div>
               </form>
@@ -1223,6 +1281,14 @@ export default function ManageSessionInteractive({
           </div>
         </div>
       )}
+      {scriptSession && <SessionScriptsDialog
+        session={scriptSession}
+        timezoneMode={timezoneMode}
+        discordIdsByName={discordIdsByName}
+        onClose={() => setScriptSession(null)}
+        onCopied={() => showToast('Message copied to clipboard.', 'success')}
+        onCopyFailed={() => showToast('Clipboard unavailable. Select the preview text to copy it.', 'error')}
+      />}
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </>
   );

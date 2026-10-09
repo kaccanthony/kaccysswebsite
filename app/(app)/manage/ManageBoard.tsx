@@ -6,7 +6,7 @@
 // re-fetches the current board when someone else changes a row, instead of the old
 // "you only see fresh data if you reload" behaviour.
 
-import { memo, useEffect, useMemo, useRef, useState, useCallback, type ReactNode, type SyntheticEvent } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { createClient } from '@/utils/supabase/client';
@@ -20,9 +20,14 @@ import { searchProfiles, type ProfileSuggestion } from '@/lib/profileSearch';
 import { VIEWABLE_RANKS, labelForRank } from '@/lib/viewAs/rankMap';
 import type { SiteTimezoneMode } from '@/lib/siteTimezone';
 import { updateSiteTimezone } from '../managesession/actions';
+import type { StaffStatsVisibility } from '@/lib/staffStatsVisibility';
+import { updatePublicStaffStatsVisibility } from './actions';
+import { compareStaffRanks } from '@/lib/staffRankOrder';
+import PageSkeleton from '@/components/PageSkeleton';
 
 const REALTIME_ENABLED = true; // flip off if you'd rather not run a channel per board
 const TIMEZONE_BOARD_KEY = 'site_timezone';
+const STAFF_STATS_BOARD_KEY = 'public_staff_stats_visibility';
 
 type Row = Record<string, any>;
 type ApiJson = { success?: boolean; message?: string; directory?: Record<string, string>; rows?: Row[] };
@@ -69,8 +74,19 @@ function truncate(str: string, n: number) {
   return str.length > n ? str.slice(0, n) + '…' : str;
 }
 
-function hideBrokenImage(event: SyntheticEvent<HTMLImageElement>) {
-  event.currentTarget.style.display = 'none';
+function StaffAvatar({ src, fallbackSrc = null, name, preview = false }: { src: string | null; fallbackSrc?: string | null; name: string; preview?: boolean }) {
+  const [primaryFailed, setPrimaryFailed] = useState(false);
+  const [fallbackFailed, setFallbackFailed] = useState(false);
+  const imageSrc = !primaryFailed && src ? src : !fallbackFailed ? fallbackSrc : null;
+  const initials = name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || '?';
+  if (!imageSrc) {
+    return <span className={`ms-avatar-fallback ${preview ? 'ms-avatar-preview' : 'ms-avatar-thumb'}`} aria-label={`${name} avatar unavailable`}>{initials}</span>;
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img className={preview ? 'ms-avatar-preview' : 'ms-avatar-thumb'} src={imageSrc} alt={`${name} avatar`} onError={() => {
+    if (!primaryFailed && src) setPrimaryFailed(true);
+    else setFallbackFailed(true);
+  }} />;
 }
 
 function formatStaffRosterJson(raw: any) {
@@ -317,7 +333,8 @@ interface ToastMsg { id: number; message: string; type: 'success' | 'error'; sho
 
 export default function ManageBoard({
   permLevel, groups, title, viewingAs, timezoneMode = 'BST', canManageTimezone = false,
-  initialTimezonePanel = false, timezoneFeedback = null,
+  staffStatsVisibility = 'full', canManageStaffStatsVisibility = false,
+  initialTimezonePanel = false, initialStaffStatsPanel = false, timezoneFeedback = null,
 }: {
   permLevel: number;
   groups: Groups;
@@ -325,7 +342,10 @@ export default function ManageBoard({
   viewingAs?: ViewAsState | null;
   timezoneMode?: SiteTimezoneMode;
   canManageTimezone?: boolean;
+  staffStatsVisibility?: StaffStatsVisibility;
+  canManageStaffStatsVisibility?: boolean;
   initialTimezonePanel?: boolean;
+  initialStaffStatsPanel?: boolean;
   timezoneFeedback?: { type: 'success' | 'error'; message: string } | null;
 }) {
   const supabase = useMemo(() => createClient(), []);
@@ -336,9 +356,16 @@ export default function ManageBoard({
     return flat;
   }, [groups]);
 
-  const [currentTable, setCurrentTable] = useState<string | null>(initialTimezonePanel && canManageTimezone ? TIMEZONE_BOARD_KEY : allBoards[0]?.[0] ?? null);
+  const [currentTable, setCurrentTable] = useState<string | null>(
+    initialStaffStatsPanel && canManageStaffStatsVisibility
+      ? STAFF_STATS_BOARD_KEY
+      : initialTimezonePanel && canManageTimezone
+      ? TIMEZONE_BOARD_KEY
+      : allBoards[0]?.[0] ?? null
+  );
   const cfg: BoardConfig | null = currentTable ? allBoards.find(([k]) => k === currentTable)?.[1] ?? null : null;
   const showingTimezone = canManageTimezone && currentTable === TIMEZONE_BOARD_KEY;
+  const showingStaffStats = canManageStaffStatsVisibility && currentTable === STAFF_STATS_BOARD_KEY;
   const tableColumns = useMemo<TableColumn[]>(
     () => cfg ? Object.entries(cfg.columns).map(([key, definition]) => ({ key, definition })) : [],
     [cfg]
@@ -350,12 +377,24 @@ export default function ManageBoard({
   const [searchTerm, setSearchTerm] = useState('');
   const [sortState, setSortState] = useState<{ col: string | null; dir: SortDirection }>({ col: null, dir: 'default' });
   const [directory, setDirectory] = useState<Record<string, string>>({});
+  const [staffOptions, setStaffOptions] = useState<string[]>([]);
+  // Kept only for this mounted /manage visit; nothing is written to browser storage.
+  const boardCache = useRef(new Map<string, Row[]>());
+  const directoryLoaded = useRef(false);
+  const activeBoard = useRef(currentTable);
+  const loadSequence = useRef(0);
   const inFlightReads = useRef(new Map<string, Promise<ApiJson>>());
-  const readJson = useCallback((url: string): Promise<ApiJson> => {
-    const existing = inFlightReads.current.get(url);
+  const readJson = useCallback((url: string, force = false): Promise<ApiJson> => {
+    const existing = !force && inFlightReads.current.get(url);
     if (existing) return existing;
-    const request = fetch(url).then((response) => response.json() as Promise<ApiJson>).finally(() => {
-      inFlightReads.current.delete(url);
+    const request = fetch(url).then(async (response) => {
+      const contentType = response.headers.get('content-type') ?? '';
+      if (!contentType.includes('json')) {
+        throw new Error(`${url} returned HTTP ${response.status} (${contentType || 'unknown response type'}).`);
+      }
+      return response.json() as Promise<ApiJson>;
+    }).finally(() => {
+      if (inFlightReads.current.get(url) === request) inFlightReads.current.delete(url);
     });
     inFlightReads.current.set(url, request);
     return request;
@@ -385,34 +424,69 @@ export default function ManageBoard({
   const needsDirectory = (board: BoardConfig | null) => !!board && Object.values(board.columns).some((d) => d.resolveId);
 
   const loadDirectory = useCallback(async () => {
+    if (directoryLoaded.current) return;
     try {
       const data = await readJson('/api/manage/directory');
-      if (data.success && data.directory) setDirectory(data.directory);
+      if (data.success && data.directory) {
+        setDirectory(data.directory);
+        directoryLoaded.current = true;
+      }
     } catch {
       /* resolveId columns just fall back to raw ids */
     }
   }, [readJson]);
 
+  useEffect(() => {
+    if (currentTable !== 'session_staff_logs' || staffOptions.length) return;
+    let cancelled = false;
+    void readJson('/api/manage/records?table=staff_roster').then((data) => {
+      if (cancelled || !data.success) return;
+      const names = (data.rows ?? [])
+        .map((row) => String(row.discord_server_name || row.discord_username || '').trim())
+        .filter(Boolean);
+      setStaffOptions([...new Set(names)].sort((a, b) => a.localeCompare(b)));
+    }).catch(() => {
+      // The editor remains usable; existing historical values are still preserved.
+    });
+    return () => { cancelled = true; };
+  }, [currentTable, readJson, staffOptions.length]);
+
   const loadBoard = useCallback(
-    async (table: string, boardCfg: BoardConfig) => {
+    async (table: string, boardCfg: BoardConfig, force = false) => {
+      const sequence = ++loadSequence.current;
+      if (force) boardCache.current.delete(table);
+      const cachedRows = !force ? boardCache.current.get(table) : undefined;
+      if (cachedRows) {
+        setRows(cachedRows);
+        setLoadError(null);
+        setLoading(false);
+        setContentPhase('visible');
+        if (needsDirectory(boardCfg)) void loadDirectory();
+        return;
+      }
       setLoading(true);
       setLoadError(null);
       setContentPhase('leaving');
       try {
         const url = table === 'staff_directory' ? endpointFor(table) : `${endpointFor(table)}?table=${encodeURIComponent(table)}`;
-        const data = await readJson(url);
+        const data = await readJson(url, force);
+        if (activeBoard.current !== table || loadSequence.current !== sequence) return;
         if (!data.success) {
           setLoadError(data.message || 'Failed to load.');
           setRows([]);
         } else {
-          setRows(data.rows ?? []);
+          const nextRows = data.rows ?? [];
+          boardCache.current.set(table, nextRows);
+          setRows(nextRows);
           if (data.directory) setDirectory((current) => ({ ...current, ...data.directory }));
           else if (needsDirectory(boardCfg)) await loadDirectory();
         }
       } catch (err) {
+        if (activeBoard.current !== table || loadSequence.current !== sequence) return;
         setLoadError(String(err));
         setRows([]);
       } finally {
+        if (activeBoard.current !== table || loadSequence.current !== sequence) return;
         setLoading(false);
         setTimeout(() => {
           setContentPhase('entering');
@@ -424,10 +498,12 @@ export default function ManageBoard({
   );
 
   const selectBoard = (table: string) => {
+    activeBoard.current = table;
+    loadSequence.current += 1;
     setCurrentTable(table);
     setSearchTerm('');
     setSortState({ col: null, dir: 'default' });
-    if (table === TIMEZONE_BOARD_KEY) setContentPhase('visible');
+    if (table === TIMEZONE_BOARD_KEY || table === STAFF_STATS_BOARD_KEY) setContentPhase('visible');
     const boardCfg = allBoards.find(([k]) => k === table)?.[1];
     if (boardCfg && !boardCfg.comingSoon && boardCfg.displayMode !== 'view_as') loadBoard(table, boardCfg);
   };
@@ -454,7 +530,10 @@ export default function ManageBoard({
     const channel = supabase
       .channel(`manage-${physicalTable}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: physicalTable }, () => {
-        if (currentTable) loadBoard(currentTable, cfg);
+        if (currentTable && activeBoard.current === currentTable) {
+          boardCache.current.delete(currentTable);
+          loadBoard(currentTable, cfg, true);
+        }
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -474,6 +553,7 @@ export default function ManageBoard({
     const sorted = [...filteredRows].sort((a, b) => {
       const av = a[sortState.col as string];
       const bv = b[sortState.col as string];
+      if (sortState.col === 'staff_rank') return compareStaffRanks(av, bv);
       if (def && (def.type === 'number' || def.type === 'bool')) return (Number(av) || 0) - (Number(bv) || 0);
       return String(av ?? '').toLowerCase().localeCompare(String(bv ?? '').toLowerCase());
     });
@@ -500,9 +580,11 @@ export default function ManageBoard({
       });
       const result = await res.json();
       if (result.success) {
+        boardCache.current.clear();
+        directoryLoaded.current = false;
         showToast(isEdit ? 'Record updated.' : 'Record added.', 'success');
         setRecordModal({ open: false, row: null });
-        if (cfg) loadBoard(currentTable, cfg);
+        if (cfg) loadBoard(currentTable, cfg, true);
       } else {
         showToast(result.message || 'Save failed.', 'error');
       }
@@ -522,8 +604,10 @@ export default function ManageBoard({
       const result = await res.json();
       setConfirmDeleteRow(null);
       if (result.success) {
+        boardCache.current.clear();
+        directoryLoaded.current = false;
         showToast('Record deleted.', 'success');
-        loadBoard(currentTable, cfg);
+        loadBoard(currentTable, cfg, true);
       } else {
         showToast(result.message || 'Delete failed.', 'error');
       }
@@ -543,8 +627,9 @@ export default function ManageBoard({
       });
       const result = await res.json();
       if (result.success) {
+        boardCache.current.clear();
         showToast(`Session #${sessionId} concluded.`, 'success');
-        if (currentTable && cfg) loadBoard(currentTable, cfg);
+        if (currentTable && cfg) loadBoard(currentTable, cfg, true);
       } else {
         showToast(result.message || 'Force conclude failed.', 'error');
       }
@@ -572,9 +657,9 @@ export default function ManageBoard({
       return <span className="ms-unresolved-id" title="No matching profile/archived record found">{String(value)}</span>;
     }
     if (def.type === 'discord_avatar') {
-      if (!value) return <span className="ms-empty-value">—</span>;
-      // eslint-disable-next-line @next/next/no-img-element
-      return <img className="ms-avatar-thumb" src={value} alt="Avatar" onError={hideBrokenImage} />;
+      const name = String(row.discord_server_name || row.discord_username || row.staff_name || row.profile_id || 'Staff');
+      const fallbackSrc = row.roblox_avatar_url ? String(row.roblox_avatar_url) : null;
+      return <StaffAvatar key={`${String(value ?? '')}|${fallbackSrc ?? ''}`} src={value ? String(value) : null} fallbackSrc={fallbackSrc} name={name} />;
     }
     if (value === null || value === undefined || value === '') {
       return <span className="ms-empty-value">—</span>;
@@ -585,6 +670,7 @@ export default function ManageBoard({
           ? <FontAwesomeIcon icon={MANAGE_ICONS.checkCircle} className="ms-bool-true" />
           : <FontAwesomeIcon icon={MANAGE_ICONS.timesCircle} className="ms-bool-false" />;
       case 'select':
+      case 'staff_select':
       case 'text':
         if (def.pill) return <span className={`ms-pill ${pillClassFor(value, def.options)}`}>{String(value)}</span>;
         return String(value);
@@ -607,6 +693,7 @@ export default function ManageBoard({
 
   // ── record modal field builder ──
   const fieldEditableNow = useCallback((def: ColumnDef, isEdit: boolean) => {
+    if (def.derived) return false;
     if (isEdit && def.editableOnUpdate === false) return false;
     if (!isEdit && def.editableOnCreate === false) return false;
     if (def.minLevel && permLevel < def.minLevel) return false;
@@ -642,18 +729,31 @@ export default function ManageBoard({
               </div>
             );
           })}
-          {canManageTimezone && (
+          {(canManageTimezone || canManageStaffStatsVisibility) && (
             <div>
               <div className="ms-group-label">Site Settings</div>
-              <button
-                type="button"
-                data-table={TIMEZONE_BOARD_KEY}
-                className={`ms-board-btn ${showingTimezone ? 'active' : ''}`}
-                onClick={() => selectBoard(TIMEZONE_BOARD_KEY)}
-              >
-                <span className="ms-board-dot" />
-                Session &amp; Event Timezone
-              </button>
+              {canManageTimezone && (
+                <button
+                  type="button"
+                  data-table={TIMEZONE_BOARD_KEY}
+                  className={`ms-board-btn ${showingTimezone ? 'active' : ''}`}
+                  onClick={() => selectBoard(TIMEZONE_BOARD_KEY)}
+                >
+                  <span className="ms-board-dot" />
+                  Session &amp; Event Timezone
+                </button>
+              )}
+              {canManageStaffStatsVisibility && (
+                <button
+                  type="button"
+                  data-table={STAFF_STATS_BOARD_KEY}
+                  className={`ms-board-btn ${showingStaffStats ? 'active' : ''}`}
+                  onClick={() => selectBoard(STAFF_STATS_BOARD_KEY)}
+                >
+                  <span className="ms-board-dot" />
+                  Public Staff Stats
+                </button>
+              )}
             </div>
           )}
         </aside>
@@ -662,10 +762,12 @@ export default function ManageBoard({
         <main className="ms-main">
           <div className="ms-board-header">
             <div>
-              <h1 className="ms-board-title">{showingTimezone ? 'Session and Event Timezone' : cfg ? cfg.label : 'Select a board'}</h1>
+              <h1 className="ms-board-title">{showingTimezone ? 'Session and Event Timezone' : showingStaffStats ? 'Public Staff Stats' : cfg ? cfg.label : 'Select a board'}</h1>
               <p className="ms-board-sub">
                 {showingTimezone
                   ? 'Change when the UK switches between BST and GMT.'
+                  : showingStaffStats
+                  ? 'Choose whether public staff profiles show department metrics or basic information only.'
                   : !cfg
                   ? 'Pick something from the sidebar to get started.'
                   : cfg.displayMode === 'view_as'
@@ -691,6 +793,11 @@ export default function ManageBoard({
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
               )}
+              {cfg && !cfg.comingSoon && cfg.displayMode !== 'view_as' && (
+                <button type="button" className="ms-refresh-btn" disabled={loading} onClick={() => { if (currentTable) loadBoard(currentTable, cfg, true); }}>
+                  Refresh
+                </button>
+              )}
               {cfg && !cfg.comingSoon && !cfg.readOnly && !cfg.noCreate && cfg.displayMode !== 'view_as' && (
                 <button
                   type="button"
@@ -706,6 +813,8 @@ export default function ManageBoard({
           <div className={`ms-board-content ms-content-${contentPhase === 'visible' ? 'visible' : contentPhase}`}>
             {showingTimezone ? (
               <TimezonePanel timezoneMode={timezoneMode} feedback={timezoneFeedback} />
+            ) : showingStaffStats ? (
+              <StaffStatsVisibilityPanel visibility={staffStatsVisibility} feedback={timezoneFeedback} />
             ) : !cfg ? null : cfg.displayMode === 'view_as' ? (
             <ViewAsPanel viewingAs={viewingAs ?? null} />
             ) : cfg.comingSoon ?  (
@@ -714,7 +823,7 @@ export default function ManageBoard({
                 <div>This board hasn't been built yet — check back soon.</div>
               </div>
             ) : loading ? (
-              <div className="ms-spinner-wrap"><div className="ms-spinner" /> Loading board…</div>
+              <PageSkeleton variant="board" />
             ) : loadError ? (
               <div className="ms-empty">
                 <FontAwesomeIcon icon={MANAGE_ICONS.warningTriangle} style={{ fontSize: '1.6rem' }} />
@@ -784,6 +893,7 @@ export default function ManageBoard({
           row={recordModal.row}
           permLevel={permLevel}
           timezoneMode={timezoneMode}
+          staffOptions={staffOptions}
           fieldEditableNow={fieldEditableNow}
           onCancel={() => setRecordModal({ open: false, row: null })}
           onSave={(data) => saveRecord(data, !!recordModal.row, recordModal.row?.[cfg.primaryKey])}
@@ -797,7 +907,8 @@ export default function ManageBoard({
           onCancel={() => setComposerOpen(false)}
           onPosted={() => {
             setComposerOpen(false);
-            if (currentTable) loadBoard(currentTable, cfg);
+            boardCache.current.clear();
+            if (currentTable) loadBoard(currentTable, cfg, true);
           }}
           showToast={showToast}
         />
@@ -869,14 +980,56 @@ function TimezonePanel({
   );
 }
 
+function StaffStatsVisibilityPanel({
+  visibility, feedback,
+}: {
+  visibility: StaffStatsVisibility;
+  feedback: { type: 'success' | 'error'; message: string } | null;
+}) {
+  const nextVisibility: StaffStatsVisibility = visibility === 'full' ? 'basic' : 'full';
+  return (
+    <>
+      {feedback && <div className={`timezone-feedback ${feedback.type}`} role="status">{feedback.message}</div>}
+      <form
+        action={updatePublicStaffStatsVisibility}
+        className="timezone-control"
+        onSubmit={(event) => {
+          const description = nextVisibility === 'full'
+            ? 'show department charts and rankings'
+            : 'show names and basic tenure information only';
+          if (!window.confirm(`Change public staff profiles to ${description}?`)) event.preventDefault();
+        }}
+      >
+        <div>
+          <strong>Public staff profile detail</strong>
+          <span>Basic keeps names, days as staff, sessions attended, and joined dates visible.</span>
+        </div>
+        <input type="hidden" name="stats_visibility" value={nextVisibility} />
+        <button
+          type="submit"
+          className={`timezone-toggle stats-visibility-toggle ${visibility}`}
+          role="switch"
+          aria-checked={visibility === 'full'}
+          aria-label={`Change public staff profiles to ${nextVisibility} mode`}
+        >
+          <span>Basic</span>
+          <i aria-hidden="true" />
+          <span>Full</span>
+        </button>
+      </form>
+    </>
+  );
+}
+
 /* ============================= record modal ============================= */
 function RecordModal({
-  cfg, row, permLevel, timezoneMode, fieldEditableNow, onCancel, onSave,
+  cfg, row, permLevel, timezoneMode, staffOptions, fieldEditableNow, onCancel, onSave,
 }: {
   cfg: BoardConfig;
   row: Row | null;
   permLevel: number;
   timezoneMode: SiteTimezoneMode;
+  staffOptions: string[];
   fieldEditableNow: (def: ColumnDef, isEdit: boolean) => boolean;
   onCancel: () => void;
   onSave: (data: Record<string, unknown>) => void;
@@ -885,6 +1038,7 @@ function RecordModal({
   const [values, setValues] = useState<Record<string, unknown>>(() => {
     const init: Record<string, unknown> = {};
     for (const [col, def] of Object.entries(cfg.columns)) {
+      if (def.derived && !isEdit) continue;
       if (col === cfg.primaryKey && isEdit) { init[col] = row![col]; continue; }
       if (!isEdit && def.editableOnCreate === false) continue;
       init[col] = row ? row[col] : def.type === 'bool' ? false : '';
@@ -913,7 +1067,8 @@ function RecordModal({
         </div>
         <div className="ms-modal-body">
           {Object.entries(cfg.columns).map(([col, def]) => {
-            if (col === cfg.primaryKey && isEdit) return <Field key={col} col={col} def={def} value={values[col]} locked timezoneMode={timezoneMode} onChange={() => {}} />;
+            if (def.derived && !isEdit) return null;
+            if (col === cfg.primaryKey && isEdit) return <Field key={col} col={col} def={def} value={values[col]} locked timezoneMode={timezoneMode} staffOptions={staffOptions} onChange={() => {}} />;
             if (!isEdit && def.editableOnCreate === false) return null;
             const locked = !fieldEditableNow(def, isEdit);
             return (
@@ -924,6 +1079,7 @@ function RecordModal({
                 value={values[col]}
                 locked={locked}
                 timezoneMode={timezoneMode}
+                staffOptions={staffOptions}
                 onChange={(v) => setValues((s) => ({ ...s, [col]: v }))}
               />
             );
@@ -938,7 +1094,7 @@ function RecordModal({
   );
 }
 
-function Field({ col, def, value, locked, timezoneMode, onChange }: { col: string; def: ColumnDef; value: unknown; locked: boolean; timezoneMode: SiteTimezoneMode; onChange: (v: unknown) => void }) {
+function Field({ col, def, value, locked, timezoneMode, staffOptions, onChange }: { col: string; def: ColumnDef; value: unknown; locked: boolean; timezoneMode: SiteTimezoneMode; staffOptions: string[]; onChange: (v: unknown) => void }) {
   const lockedTag = locked ? <span className="ms-locked-tag">(locked)</span> : null;
   let input: React.ReactNode;
   switch (def.type) {
@@ -952,6 +1108,17 @@ function Field({ col, def, value, locked, timezoneMode, onChange }: { col: strin
         </select>
       );
       break;
+    case 'staff_select': {
+      const current = String(value ?? '').trim();
+      const options = current && !staffOptions.includes(current) ? [current, ...staffOptions] : staffOptions;
+      input = (
+        <select value={current} disabled={locked} onChange={(e) => onChange(e.target.value)}>
+          <option value="">— None —</option>
+          {options.map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      );
+      break;
+    }
     case 'textarea':
     case 'staff_roster_json':
       input = <textarea value={String(value ?? '')} disabled={locked} onChange={(e) => onChange(e.target.value)} />;
@@ -963,8 +1130,7 @@ function Field({ col, def, value, locked, timezoneMode, onChange }: { col: strin
       input = <input type="date" value={String(value ?? '')} disabled={locked} onChange={(e) => onChange(e.target.value)} />;
       break;
     case 'discord_avatar':
-      // eslint-disable-next-line @next/next/no-img-element
-      input = value ? <img className="ms-avatar-preview" src={String(value)} alt="Avatar" /> : <span style={{ color: 'rgba(255,255,255,.4)' }}>No avatar on file</span>;
+      input = <StaffAvatar key={String(value ?? '')} src={value ? String(value) : null} name="Staff" preview />;
       break;
     default:
       input = <input type="text" value={String(value ?? '')} disabled={locked} onChange={(e) => onChange(e.target.value)} />;

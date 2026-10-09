@@ -4,6 +4,7 @@ import { config as faConfig } from '@fortawesome/fontawesome-svg-core';
 import '@fortawesome/fontawesome-svg-core/styles.css';
 import './globals.css';
 import VersionBadge from '@/components/VersionBadge';
+import ConnectionStatusPill from '@/components/ConnectionStatusPill';
 
 // react-fontawesome injects its own <style> tag by default, which causes the
 // exact class of hydration mismatch we kept hitting with the kit script.
@@ -30,6 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body suppressHydrationWarning>
         {children}
+        <ConnectionStatusPill />
         {/* Always present — login, terms, privacy, dashboard, everywhere */}
         <VersionBadge />
       </body>

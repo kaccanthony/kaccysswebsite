@@ -9,13 +9,15 @@ import { createAdminClient } from '@/utils/supabase/admin';
 import { createClient } from '@/utils/supabase/server';
 import { fetchSession, buildRowsFromSession } from '@/lib/activeSession';
 import PublicRowsTable from '@/app/(app)/active/PublicRowsTable';
-import ReportNoSession from '@/app/(app)/active/ReportNoSession';
-import LiveStatus from '@/app/(app)/active/LiveStatus';
+import OngoingActivityPill from '@/app/(app)/OngoingActivityPill';
+import { getOngoingActivity } from '@/lib/ongoingActivity';
 import '../../(app)/active/active.css';
 
 export const metadata = {
   title: 'Active Session',
 };
+
+function serverRenderTime() { return Date.now(); }
 
 export default async function ActiveSessionPage({
   searchParams,
@@ -24,9 +26,10 @@ export default async function ActiveSessionPage({
 }) {
   const { session_id } = await searchParams;
   const sessionIdNum = session_id ? parseInt(session_id, 10) : undefined;
-  const [session, user] = await Promise.all([
+  const [session, user, ongoingActivity] = await Promise.all([
     fetchSession(createAdminClient(), sessionIdNum),
     getCurrentUserOrNull(),
+    getOngoingActivity(createAdminClient()),
   ]);
 
   const rows = session ? buildRowsFromSession(session) : [];
@@ -72,10 +75,6 @@ export default async function ActiveSessionPage({
             </div>
             <div className="session-sub">Public view · read-only — trainee progress only</div>
           </div>
-
-          <div className="session-topbar-right">
-            {session ? <LiveStatus sessionId={session.session_id} /> : <ReportNoSession />}
-          </div>
         </div>
 
         {!session ? (
@@ -99,11 +98,7 @@ export default async function ActiveSessionPage({
                     <th>Completed</th>
                   </tr>
                 </thead>
-                <PublicRowsTable
-                  sessionId={session.session_id}
-                  initialRows={rows}
-                  initialLastChangeAt={Number.isFinite(initialLastChangeAt) ? initialLastChangeAt : null}
-                />
+                <PublicRowsTable sessionId={session.session_id} initialRows={rows} />
               </table>
             </div>
           </section>
@@ -120,7 +115,7 @@ export default async function ActiveSessionPage({
     };
     return (
       <AppShell
-        serverNow={Date.now()}
+        serverNow={serverRenderTime()}
         hasLiveSession={hasAssignedLiveSession}
         liveSessionLastChangeAt={hasAssignedLiveSession && Number.isFinite(initialLastChangeAt) ? initialLastChangeAt : null}
         user={{
@@ -133,6 +128,7 @@ export default async function ActiveSessionPage({
         }}
         assignedSessions={assignedSessions}
         unreadCount={unreadCount}
+        ongoingActivity={ongoingActivity}
       >
         {content}
       </AppShell>
@@ -146,18 +142,21 @@ export default async function ActiveSessionPage({
           <img src="/images/YSSLogo.png" alt="" />
           <span>YSS Central</span>
         </Link>
-        <details className="guest-profile">
-          <summary aria-label="Guest profile and sign-in options">
-            <span className="guest-avatar"><FontAwesomeIcon icon={faUser} /></span>
-            <span className="guest-profile-meta"><strong>Guest viewer</strong><small>Public access</small></span>
-            <FontAwesomeIcon icon={faChevronDown} className="guest-chevron" />
-          </summary>
-          <div className="guest-profile-menu">
-            <strong>Welcome to YSS Central</strong>
-            <p>You can view the active trainee panel without an account. Sign in to access your profile and the rest of the website.</p>
-            <Link href="/login">Sign in or create a profile</Link>
-          </div>
-        </details>
+        <div className="guest-topbar-right">
+          <OngoingActivityPill initialActivity={ongoingActivity} publicView />
+          <details className="guest-profile">
+            <summary aria-label="Guest profile and sign-in options">
+              <span className="guest-avatar"><FontAwesomeIcon icon={faUser} /></span>
+              <span className="guest-profile-meta"><strong>Guest viewer</strong><small>Public access</small></span>
+              <FontAwesomeIcon icon={faChevronDown} className="guest-chevron" />
+            </summary>
+            <div className="guest-profile-menu">
+              <strong>Welcome to YSS Central</strong>
+              <p>You can view the active trainee panel without an account. Sign in to access your profile and the rest of the website.</p>
+              <Link href="/login">Sign in or create a profile</Link>
+            </div>
+          </details>
+        </div>
       </header>
       <div className="bg-app" />
       {content}
